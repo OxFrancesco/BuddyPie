@@ -1,33 +1,34 @@
 import { useWallet, shortAddress, isWalletOnBaseSepolia } from './wallet-provider'
+import { Button } from '~/components/ui/button'
 
 export function WalletButton() {
   const wallet = useWallet()
 
   if (!wallet.hasWallet) {
     return (
-      <button className="button button-muted" type="button" disabled>
+      <Button variant="outline" size="sm" disabled>
         Install wallet
-      </button>
+      </Button>
     )
   }
 
   if (!wallet.account) {
     return (
-      <button className="button button-secondary" type="button" onClick={() => void wallet.connect()}>
-        {wallet.isConnecting ? 'Connecting...' : 'Connect Base wallet'}
-      </button>
+      <Button variant="secondary" size="sm" onClick={() => void wallet.connect()}>
+        {wallet.isConnecting ? 'Connecting...' : 'Connect wallet'}
+      </Button>
     )
   }
 
   return (
-    <button
-      className={`button ${isWalletOnBaseSepolia(wallet.chainId) ? 'button-muted' : 'button-danger'}`}
-      type="button"
+    <Button
+      variant={isWalletOnBaseSepolia(wallet.chainId) ? 'outline' : 'destructive'}
+      size="sm"
       onClick={() => void wallet.connect()}
       title={wallet.account}
     >
       {shortAddress(wallet.account)}
-      {isWalletOnBaseSepolia(wallet.chainId) ? ' on Base Sepolia' : ' switch network'}
-    </button>
+      {isWalletOnBaseSepolia(wallet.chainId) ? '' : ' · switch network'}
+    </Button>
   )
 }

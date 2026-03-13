@@ -3,6 +3,17 @@ import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery } from 'convex/react'
 import { api as generatedApi } from '../../../convex/_generated/api'
 import { shortAddress, useWallet } from '~/components/wallet-provider'
+import { Button } from '~/components/ui/button'
+import { Badge } from '~/components/ui/badge'
+import { Input } from '~/components/ui/input'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '~/components/ui/card'
+import { Separator } from '~/components/ui/separator'
 
 const api = generatedApi as any
 
@@ -89,56 +100,56 @@ function DashboardPage() {
   }
 
   return (
-    <div className="dashboard-page">
-      <section className="page-hero card">
-        <div>
-          <p className="eyebrow">Dashboard</p>
-          <h1>Import a repository and boot a paid agent run.</h1>
-          <p className="muted">
-            Auth comes from Clerk GitHub OAuth. Wallet payment uses x402 on Base Sepolia.
-          </p>
-        </div>
-        <div className="hero-meta">
-          <div className="meta-chip">
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          Import a repository and boot a paid agent run.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="font-mono text-xs">
             Wallet: {wallet.account ? shortAddress(wallet.account) : 'not connected'}
-          </div>
-          <div className="meta-chip">
-            Active profiles: {dashboard?.agentProfiles?.length ?? 0}
-          </div>
+          </Badge>
+          <Badge variant="outline" className="font-mono text-xs">
+            Profiles: {dashboard?.agentProfiles?.length ?? 0}
+          </Badge>
         </div>
-      </section>
+      </div>
 
-      <section className="dashboard-grid">
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h2>Import GitHub repo</h2>
-              <p className="muted">Paste a repo URL or select one from your GitHub account.</p>
+      <Separator />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Import GitHub repo</CardTitle>
+            <CardDescription>
+              Paste a repo URL or select one from your GitHub account.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex gap-2">
+              <Input
+                placeholder="owner/repo"
+                value={repoInput}
+                onChange={(event) => setRepoInput(event.target.value)}
+              />
+              <Button
+                disabled={importing || repoInput.trim().length === 0}
+                onClick={() => void submitImport(repoInput)}
+              >
+                {importing ? 'Importing…' : 'Import'}
+              </Button>
             </div>
-          </div>
-          <div className="repo-import-form">
-            <input
-              className="input"
-              placeholder="github.com/owner/repo or owner/repo"
-              value={repoInput}
-              onChange={(event) => setRepoInput(event.target.value)}
-            />
-            <button
-              className="button button-primary"
-              type="button"
-              disabled={importing || repoInput.trim().length === 0}
-              onClick={() => void submitImport(repoInput)}
-            >
-              {importing ? 'Importing...' : 'Import repo'}
-            </button>
-          </div>
-          {error ? <p className="error-banner">{error}</p> : null}
-          <div className="repo-list">
-            <div className="section-heading">
-              <h3>GitHub repos</h3>
-              <button
-                className="button button-muted"
-                type="button"
+            {error ? (
+              <p className="border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">GitHub repos</p>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setRepos([])
                   setRepoInput('')
@@ -146,91 +157,104 @@ function DashboardPage() {
                 }}
               >
                 Clear
-              </button>
+              </Button>
             </div>
-            {loadingRepos ? <p className="muted">Loading GitHub repositories...</p> : null}
-            {repos.slice(0, 12).map((repo) => (
-              <button
-                key={repo.fullName}
-                className="repo-row"
-                type="button"
-                onClick={() => {
-                  setRepoInput(repo.fullName)
-                  void submitImport(repo.fullName)
-                }}
+            {loadingRepos ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : null}
+            <div className="flex flex-col gap-1">
+              {repos.slice(0, 12).map((repo) => (
+                <button
+                  key={repo.fullName}
+                  type="button"
+                  className="flex items-center justify-between gap-2 border-2 border-border px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+                  onClick={() => {
+                    setRepoInput(repo.fullName)
+                    void submitImport(repo.fullName)
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{repo.fullName}</p>
+                    <p className="truncate text-muted-foreground">
+                      {repo.description ?? 'No description'}
+                    </p>
+                  </div>
+                  <Badge variant={repo.private ? 'destructive' : 'secondary'}>
+                    {repo.private ? 'private' : 'public'}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Platform agents</CardTitle>
+            <CardDescription>Agent profiles available for paid runs.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-3">
+              {(dashboard?.agentProfiles ?? []).map((profile: any) => (
+                <div
+                  key={profile.slug}
+                  className="flex flex-col gap-1 border-2 border-border p-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium">{profile.name}</p>
+                    <Badge variant="secondary">{profile.priceLabel}</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{profile.description}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{profile.chain}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Your workspaces</CardTitle>
+          <CardDescription>
+            Persistent sandboxes with repo state, previews, and run history.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {(dashboard?.workspaces ?? []).map((workspace: any) => (
+              <Link
+                key={workspace._id}
+                className="flex flex-col gap-2 border-2 border-border p-3 transition-colors hover:bg-muted"
+                to="/workspaces/$workspaceId"
+                params={{ workspaceId: workspace._id }}
               >
-                <div>
-                  <strong>{repo.fullName}</strong>
-                  <p className="muted">{repo.description ?? 'No description provided.'}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate text-sm font-medium">{workspace.repoFullName}</p>
+                  <Badge
+                    variant={workspace.status === 'ready' ? 'secondary' : 'destructive'}
+                  >
+                    {workspace.status}
+                  </Badge>
                 </div>
-                <span className={`status-pill ${repo.private ? 'status-pill--warn' : ''}`}>
-                  {repo.private ? 'private' : 'public'}
-                </span>
-              </button>
+                <p className="text-xs text-muted-foreground">
+                  {workspace.sandboxName ?? 'pending'} · {workspace.branch}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {workspace.latestRun
+                    ? `${workspace.latestRun.agentSlug} · ${workspace.latestRun.status}`
+                    : 'No runs yet'}
+                </p>
+              </Link>
             ))}
-          </div>
-        </article>
-
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h2>Platform agents</h2>
-              <p className="muted">Two platform-owned agent profiles for the MVP.</p>
-            </div>
-          </div>
-          <div className="agent-cards">
-            {(dashboard?.agentProfiles ?? []).map((profile: any) => (
-              <article key={profile.slug} className="agent-card">
-                <div className={`accent-bar accent-bar--${profile.accent}`} />
-                <div>
-                  <h3>{profile.name}</h3>
-                  <p className="muted">{profile.description}</p>
-                </div>
-                <div className="agent-card__footer">
-                  <span className="status-pill">{profile.priceLabel}</span>
-                  <span className="muted">{profile.chain}</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="card">
-        <div className="section-heading">
-          <div>
-            <h2>Your workspaces</h2>
-            <p className="muted">Persistent sandboxes with repo state, previews, and run history.</p>
-          </div>
-        </div>
-        <div className="workspace-grid">
-          {(dashboard?.workspaces ?? []).map((workspace: any) => (
-            <Link
-              key={workspace._id}
-              className="workspace-card"
-              to="/workspaces/$workspaceId"
-              params={{ workspaceId: workspace._id }}
-            >
-              <div className="section-heading">
-                <strong>{workspace.repoFullName}</strong>
-                <span className={`status-pill ${workspace.status !== 'ready' ? 'status-pill--warn' : ''}`}>
-                  {workspace.status}
-                </span>
-              </div>
-              <p className="muted">Sandbox {workspace.sandboxName ?? 'pending'}</p>
-              <p className="muted">Branch {workspace.branch}</p>
-              <p className="workspace-meta">
-                {workspace.latestRun
-                  ? `${workspace.latestRun.agentSlug} · ${workspace.latestRun.status}`
-                  : 'No runs yet'}
+            {dashboard?.workspaces?.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No workspaces yet. Import a GitHub repository to create one.
               </p>
-            </Link>
-          ))}
-          {dashboard?.workspaces?.length === 0 ? (
-            <p className="muted">No workspaces yet. Import a GitHub repository to create one.</p>
-          ) : null}
-        </div>
-      </section>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

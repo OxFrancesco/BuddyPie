@@ -3,6 +3,17 @@ import { Link, createFileRoute } from '@tanstack/react-router'
 import { useQuery } from 'convex/react'
 import { api as generatedApi } from '../../../../convex/_generated/api'
 import { useWallet } from '~/components/wallet-provider'
+import { Button } from '~/components/ui/button'
+import { Badge } from '~/components/ui/badge'
+import { Textarea } from '~/components/ui/textarea'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '~/components/ui/card'
+import { Separator } from '~/components/ui/separator'
 
 const api = generatedApi as any
 
@@ -118,166 +129,195 @@ function WorkspaceDetailPage() {
   }
 
   return (
-    <div className="workspace-page">
-      <section className="page-hero card">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="eyebrow">Workspace</p>
-          <h1>{detail?.workspace?.repoFullName ?? 'Loading workspace...'}</h1>
-          <p className="muted">
-            Sandbox {detail?.workspace?.sandboxName ?? 'pending'} · Branch {detail?.workspace?.branch ?? '-'}
+          <h1 className="text-2xl font-bold tracking-tight">
+            {detail?.workspace?.repoFullName ?? 'Loading…'}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Sandbox {detail?.workspace?.sandboxName ?? 'pending'} · Branch{' '}
+            {detail?.workspace?.branch ?? '–'}
           </p>
         </div>
-        <div className="hero-actions">
-          <button className="button button-muted" type="button" onClick={() => void syncRepo()}>
-            {busyAction?.includes('/sync') ? 'Syncing...' : 'Sync repo'}
-          </button>
-          <button className="button button-secondary" type="button" onClick={() => void refreshPreview()}>
-            {busyAction?.includes('/preview-link') ? 'Refreshing...' : 'Preview link'}
-          </button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void syncRepo()}>
+            {busyAction?.includes('/sync') ? 'Syncing…' : 'Sync repo'}
+          </Button>
+          <Button size="sm" onClick={() => void refreshPreview()}>
+            {busyAction?.includes('/preview-link') ? 'Refreshing…' : 'Preview link'}
+          </Button>
         </div>
-      </section>
+      </div>
 
-      {error ? <p className="error-banner">{error}</p> : null}
+      {error ? (
+        <p className="border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
 
-      <section className="workspace-grid-two">
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h2>Run an agent</h2>
-              <p className="muted">
-                Connect a Base Sepolia wallet, enter a prompt, and pay the x402 challenge automatically.
-              </p>
-            </div>
-          </div>
-          <textarea
-            className="input input-textarea"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Explain what you want the frontend or docs agent to do in this repository."
-          />
-          <div className="button-row">
-            <button
-              className="button button-primary"
-              type="button"
-              disabled={busyAction !== null || !wallet.account}
-              onClick={() => void startRun('frontend')}
-            >
-              Start frontend agent
-            </button>
-            <button
-              className="button button-secondary"
-              type="button"
-              disabled={busyAction !== null || !wallet.account}
-              onClick={() => void startRun('docs')}
-            >
-              Start docs agent
-            </button>
-          </div>
-          {!wallet.account ? (
-            <p className="muted">Connect a wallet in the top bar before starting a paid run.</p>
-          ) : null}
-        </article>
+      <Separator />
 
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h2>Preview</h2>
-              <p className="muted">
-                If the frontend agent detects a dev server port, BuddyPie can generate a signed Daytona preview URL.
-              </p>
-            </div>
-          </div>
-          {previewUrl ? (
-            <div className="preview-frame">
-              <iframe src={previewUrl} title="BuddyPie preview" />
-            </div>
-          ) : (
-            <p className="muted">No preview URL generated yet.</p>
-          )}
-        </article>
-      </section>
-
-      <section className="workspace-grid-two">
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h2>Active session</h2>
-              <p className="muted">
-                One active run per workspace. Follow-up messages are included in the same paid job.
-              </p>
-            </div>
-            {activeRun ? (
-              <Link
-                className="button button-muted"
-                to="/runs/$runId"
-                params={{ runId: activeRun._id }}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Run an agent</CardTitle>
+            <CardDescription>
+              Connect a Base Sepolia wallet, enter a prompt, and pay the x402 challenge.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <Textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Describe what the agent should do in this repository."
+              rows={5}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                disabled={busyAction !== null || !wallet.account}
+                onClick={() => void startRun('frontend')}
               >
-                Open run view
-              </Link>
+                Frontend agent
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={busyAction !== null || !wallet.account}
+                onClick={() => void startRun('docs')}
+              >
+                Docs agent
+              </Button>
+            </div>
+            {!wallet.account ? (
+              <p className="text-xs text-muted-foreground">
+                Connect a wallet in the top bar before starting a paid run.
+              </p>
             ) : null}
-          </div>
-          {activeRun ? (
-            <>
-              <div className="button-row">
-                <button className="button button-muted" type="button" onClick={() => void refreshRunState()}>
-                  Refresh session
-                </button>
-                <button className="button button-danger" type="button" onClick={() => void abortActiveRun()}>
-                  Abort run
-                </button>
-              </div>
-              <div className="transcript">
-                {(detail?.runEvents ?? []).map((event: any) => (
-                  <div key={event._id} className="transcript__event">
-                    <span className="status-pill">{event.type}</span>
-                    <p>{event.content ?? JSON.stringify(event.raw)}</p>
-                  </div>
-                ))}
-                {detail?.runEvents?.length === 0 ? (
-                  <p className="muted">No captured run events yet. Refresh the session after the agent starts streaming.</p>
-                ) : null}
-              </div>
-              <textarea
-                className="input input-textarea"
-                value={followUp}
-                onChange={(event) => setFollowUp(event.target.value)}
-                placeholder="Send a follow-up instruction to the active run."
-              />
-              <button className="button button-primary" type="button" onClick={() => void sendMessage()}>
-                Send follow-up
-              </button>
-            </>
-          ) : (
-            <p className="muted">No active run. Start one above.</p>
-          )}
-        </article>
+          </CardContent>
+        </Card>
 
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h2>Run history</h2>
-              <p className="muted">Recent paid jobs for this workspace.</p>
+        <Card>
+          <CardHeader>
+            <CardTitle>Preview</CardTitle>
+            <CardDescription>
+              Signed Daytona preview URL when a dev server port is detected.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {previewUrl ? (
+              <div className="overflow-hidden border-2 border-foreground">
+                <iframe
+                  src={previewUrl}
+                  title="BuddyPie preview"
+                  className="min-h-80 w-full border-0"
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No preview URL generated yet.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Active session</CardTitle>
+                <CardDescription>
+                  Follow-up messages are included in the same paid job.
+                </CardDescription>
+              </div>
+              {activeRun ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={
+                    <Link to="/runs/$runId" params={{ runId: activeRun._id }} />
+                  }
+                >
+                  Open run
+                </Button>
+              ) : null}
             </div>
-          </div>
-          <div className="history-list">
-            {(detail?.runs ?? []).map((run: any) => (
-              <Link
-                key={run._id}
-                className="history-row"
-                to="/runs/$runId"
-                params={{ runId: run._id }}
-              >
-                <div>
-                  <strong>{run.agentSlug}</strong>
-                  <p className="muted">{run.status}</p>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {activeRun ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void refreshRunState()}>
+                    Refresh
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => void abortActiveRun()}>
+                    Abort
+                  </Button>
                 </div>
-                <span className="muted">{new Date(run.startedAt).toLocaleString()}</span>
-              </Link>
-            ))}
-            {detail?.runs?.length === 0 ? <p className="muted">No runs yet.</p> : null}
-          </div>
-        </article>
-      </section>
+                <div className="flex max-h-72 flex-col gap-2 overflow-auto">
+                  {(detail?.runEvents ?? []).map((event: any) => (
+                    <div
+                      key={event._id}
+                      className="flex flex-col gap-1 border-2 border-border p-2"
+                    >
+                      <Badge variant="secondary" className="w-fit text-xs">
+                        {event.type}
+                      </Badge>
+                      <p className="text-sm text-muted-foreground">
+                        {event.content ?? JSON.stringify(event.raw)}
+                      </p>
+                    </div>
+                  ))}
+                  {detail?.runEvents?.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No events yet. Refresh after the agent starts streaming.
+                    </p>
+                  ) : null}
+                </div>
+                <Separator />
+                <Textarea
+                  value={followUp}
+                  onChange={(event) => setFollowUp(event.target.value)}
+                  placeholder="Send a follow-up instruction."
+                  rows={3}
+                />
+                <Button onClick={() => void sendMessage()}>Send follow-up</Button>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No active run. Start one above.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Run history</CardTitle>
+            <CardDescription>Recent paid jobs for this workspace.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2">
+              {(detail?.runs ?? []).map((run: any) => (
+                <Link
+                  key={run._id}
+                  className="flex items-center justify-between border-2 border-border px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  to="/runs/$runId"
+                  params={{ runId: run._id }}
+                >
+                  <div>
+                    <p className="font-medium">{run.agentSlug}</p>
+                    <p className="text-xs text-muted-foreground">{run.status}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(run.startedAt).toLocaleString()}
+                  </span>
+                </Link>
+              ))}
+              {detail?.runs?.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No runs yet.</p>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

@@ -1,5 +1,8 @@
-import { Outlet, createFileRoute, useLocation } from '@tanstack/react-router'
-import { SignIn } from '@clerk/tanstack-react-start'
+import { Link, Outlet, createFileRoute, useLocation } from '@tanstack/react-router'
+import { SignedIn, UserButton } from '@clerk/tanstack-react-start'
+import { AuthCard } from '~/components/auth-card'
+import { WalletButton } from '~/components/wallet-button'
+import { Button } from '~/components/ui/button'
 
 export const Route = createFileRoute('/_authed')({
   beforeLoad: ({ context }) => {
@@ -11,11 +14,7 @@ export const Route = createFileRoute('/_authed')({
     const location = useLocation()
 
     if (error.message === 'Not authenticated') {
-      return (
-        <div className="flex items-center justify-center p-12">
-          <SignIn routing="hash" forceRedirectUrl={location.href} />
-        </div>
-      )
+      return <AuthCard mode="sign-in" forceRedirectUrl={location.href} />
     }
 
     throw error
@@ -25,8 +24,36 @@ export const Route = createFileRoute('/_authed')({
 
 function AuthedLayout() {
   return (
-    <div className="authed-layout">
-      <Outlet />
-    </div>
+    <>
+      <header className="sticky top-0 z-10 border-b-2 border-foreground bg-background">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
+          <Link
+            to="/"
+            activeOptions={{ exact: true }}
+            className="flex items-center gap-2 font-bold uppercase tracking-wide"
+          >
+            <span className="size-2 bg-foreground" />
+            BuddyPie
+          </Link>
+          <nav className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" render={<Link to="/" activeOptions={{ exact: true }} />}>
+              Home
+            </Button>
+            <Button variant="ghost" size="sm" render={<Link to="/dashboard" />}>
+              Dashboard
+            </Button>
+          </nav>
+          <div className="flex items-center gap-2">
+            <SignedIn>
+              <WalletButton />
+              <UserButton />
+            </SignedIn>
+          </div>
+        </div>
+      </header>
+      <div className="py-6">
+        <Outlet />
+      </div>
+    </>
   )
 }

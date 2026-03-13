@@ -1,6 +1,5 @@
 import {
   HeadContent,
-  Link,
   Outlet,
   Scripts,
   createRootRouteWithContext,
@@ -8,10 +7,6 @@ import {
 } from '@tanstack/react-router'
 import {
   ClerkProvider,
-  SignInButton,
-  SignedIn,
-  SignedOut,
-  UserButton,
   useAuth,
 } from '@clerk/tanstack-react-start'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
@@ -23,7 +18,6 @@ import type { ConvexQueryClient } from '@convex-dev/react-query'
 import type { ConvexReactClient } from 'convex/react'
 import type { QueryClient } from '@tanstack/react-query'
 import appCss from '~/styles/app.css?url'
-import { WalletButton } from '~/components/wallet-button'
 import { WalletProvider } from '~/components/wallet-provider'
 
 const fetchClerkAuth = createServerFn({ method: 'GET' }).handler(async () => {
@@ -80,8 +74,6 @@ export const Route = createRootRouteWithContext<{
   beforeLoad: async (ctx) => {
     const clerkAuth = await fetchClerkAuth()
     const { userId, token } = clerkAuth
-    // During SSR only (the only time serverHttpClient exists),
-    // set the Clerk auth token to make HTTP queries with.
     if (token) {
       ctx.context.convexQueryClient.serverHttpClient?.setAuth(token)
     }
@@ -112,49 +104,16 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html>
+    <html className="dark">
       <head>
         <HeadContent />
       </head>
       <body>
-        <div className="app-shell">
-          <header className="topbar">
-            <Link
-              to="/"
-              activeOptions={{ exact: true }}
-              className="brandmark"
-            >
-              <span className="brandmark__orb" />
-              BuddyPie
-            </Link>
-            <nav className="topbar__links">
-              <Link to="/" activeOptions={{ exact: true }} className="topbar__link">
-                Home
-              </Link>
-              <SignedIn>
-                <Link to="/dashboard" className="topbar__link">
-                  Dashboard
-                </Link>
-              </SignedIn>
-            </nav>
-            <div className="topbar__actions">
-              <SignedIn>
-                <WalletButton />
-              </SignedIn>
-              <div>
-                <SignedIn>
-                  <UserButton />
-                </SignedIn>
-                <SignedOut>
-                  <SignInButton mode="modal" />
-                </SignedOut>
-              </div>
-            </div>
-          </header>
-          <main className="page-frame">{children}</main>
+        <div className="relative min-h-screen">
+          <main className="mx-auto w-full max-w-5xl px-4">
+            {children}
+          </main>
         </div>
-        <div className="app-backdrop" />
-        <div className="app-noise" />
         <TanStackRouterDevtools position="bottom-right" />
         <Scripts />
       </body>

@@ -9,6 +9,9 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SsoCallbackRouteImport } from './routes/sso-callback'
+import { Route as SignUpRouteImport } from './routes/sign-up'
+import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
@@ -28,6 +31,21 @@ import { Route as ApiRunsRunIdMessagesRouteImport } from './routes/api/runs/$run
 import { Route as ApiRunsRunIdAbortRouteImport } from './routes/api/runs/$runId/abort'
 import { Route as AgentsSlugDotwellKnownAgentCardDotjsonRouteImport } from './routes/agents/$slug/[.]well-known/agent-card[.]json'
 
+const SsoCallbackRoute = SsoCallbackRouteImport.update({
+  id: '/sso-callback',
+  path: '/sso-callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpRoute = SignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
   getParentRoute: () => rootRouteImport,
@@ -126,6 +144,9 @@ const AgentsSlugDotwellKnownAgentCardDotjsonRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/sso-callback': typeof SsoCallbackRoute
   '/dashboard': typeof AuthedDashboardRoute
   '/runs/$runId': typeof AuthedRunsRunIdRoute
   '/workspaces/$workspaceId': typeof AuthedWorkspacesWorkspaceIdRoute
@@ -145,6 +166,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/sso-callback': typeof SsoCallbackRoute
   '/dashboard': typeof AuthedDashboardRoute
   '/runs/$runId': typeof AuthedRunsRunIdRoute
   '/workspaces/$workspaceId': typeof AuthedWorkspacesWorkspaceIdRoute
@@ -166,6 +190,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/sso-callback': typeof SsoCallbackRoute
   '/_authed/dashboard': typeof AuthedDashboardRoute
   '/_authed/runs/$runId': typeof AuthedRunsRunIdRoute
   '/_authed/workspaces/$workspaceId': typeof AuthedWorkspacesWorkspaceIdRoute
@@ -187,6 +214,9 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/sign-in'
+    | '/sign-up'
+    | '/sso-callback'
     | '/dashboard'
     | '/runs/$runId'
     | '/workspaces/$workspaceId'
@@ -206,6 +236,9 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/sign-in'
+    | '/sign-up'
+    | '/sso-callback'
     | '/dashboard'
     | '/runs/$runId'
     | '/workspaces/$workspaceId'
@@ -226,6 +259,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authed'
+    | '/sign-in'
+    | '/sign-up'
+    | '/sso-callback'
     | '/_authed/dashboard'
     | '/_authed/runs/$runId'
     | '/_authed/workspaces/$workspaceId'
@@ -247,6 +283,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
+  SignInRoute: typeof SignInRoute
+  SignUpRoute: typeof SignUpRoute
+  SsoCallbackRoute: typeof SsoCallbackRoute
   AgentsSlugA2aRoute: typeof AgentsSlugA2aRoute
   AgentsSlugMcpRoute: typeof AgentsSlugMcpRoute
   AgentsSlugOasfDotjsonRoute: typeof AgentsSlugOasfDotjsonRoute
@@ -264,6 +303,27 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sso-callback': {
+      id: '/sso-callback'
+      path: '/sso-callback'
+      fullPath: '/sso-callback'
+      preLoaderRoute: typeof SsoCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up': {
+      id: '/sign-up'
+      path: '/sign-up'
+      fullPath: '/sign-up'
+      preLoaderRoute: typeof SignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authed': {
       id: '/_authed'
       path: ''
@@ -411,6 +471,9 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
+  SignInRoute: SignInRoute,
+  SignUpRoute: SignUpRoute,
+  SsoCallbackRoute: SsoCallbackRoute,
   AgentsSlugA2aRoute: AgentsSlugA2aRoute,
   AgentsSlugMcpRoute: AgentsSlugMcpRoute,
   AgentsSlugOasfDotjsonRoute: AgentsSlugOasfDotjsonRoute,
