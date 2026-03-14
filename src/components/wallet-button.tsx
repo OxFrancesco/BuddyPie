@@ -21,14 +21,14 @@ export function WalletButton() {
   }
 
   return (
-    <Button
-      variant={isWalletOnBaseSepolia(wallet.chainId) ? 'outline' : 'destructive'}
-      size="sm"
+    <button
+      type="button"
       onClick={() => void wallet.connect()}
       title={wallet.account}
+      className="flex h-8 items-center border-2 border-foreground bg-background px-3 font-mono text-xs text-foreground transition-all hover:translate-x-px hover:translate-y-px active:translate-x-0.5 active:translate-y-0.5"
     >
       {shortAddress(wallet.account)}
       {isWalletOnBaseSepolia(wallet.chainId) ? '' : ' · switch network'}
-    </Button>
+    </button>
   )
 }

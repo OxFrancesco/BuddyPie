@@ -7,18 +7,78 @@ import {
 import { createServerConvexClient, convexApi } from './convex-server'
 import {
   abortPiRun,
+  commitRepoChanges,
+  createRepoBranch,
   ensureRepoClone,
   ensureSandbox,
   getDaytonaClient,
+  getRepoGitState,
   getSignedPreviewUrl,
+  pushRepoChanges,
   startPiRun,
   syncRepoClone,
   syncRunLogs,
   uploadBuddyPiAssets,
   sendRunMessage,
 } from './daytona'
-import { fetchGitHubRepo, parseGitHubRepoInput } from './github'
+import {
+  createGitHubPullRequest,
+  fetchGitHubRepo,
+  parseGitHubRepoInput,
+} from './github'
 import { getRemotePiSessionDir, getRemoteRepoPath } from './pi'
+
+type GitIdentity = {
+  name: string
+  email: string
+}
+
+async function getWorkspaceRuntimeContext(options: {
+  workspaceId: Id<'workspaces'>
+  requesterId: string
+}) {
+  const convex = await createServerConvexClient({ useViewerToken: false })
+  const workspace = await convex.query(convexApi.buddypie.workspaceForServer, {
+    workspaceId: options.workspaceId,
+    requesterId: options.requesterId,
+  })
+
+  if (!workspace) {
+    throw new Error('Workspace not found')
+  }
+
+  if (!workspace.sandboxId || !workspace.repoPath) {
+    throw new Error('Workspace sandbox is not ready yet')
+  }
+
+  const sandbox = await getDaytonaClient().get(workspace.sandboxId)
+  await sandbox.start(60)
+
+  return {
+    convex,
+    workspace,
+    sandbox,
+  }
+}
+
+async function persistWorkspaceGitMetadata(options: {
+  convex: Awaited<ReturnType<typeof createServerConvexClient>>
+  workspaceId: Id<'workspaces'>
+  git: Awaited<ReturnType<typeof getRepoGitState>>
+  lastCommitSha?: string
+  lastPullRequestUrl?: string
+}) {
+  return options.convex.mutation(convexApi.buddypie.recordWorkspaceGitMetadata, {
+    workspaceId: options.workspaceId,
+    branch: options.git.currentBranch,
+    gitBranchPublished: options.git.branchPublished,
+    gitAhead: options.git.ahead,
+    gitBehind: options.git.behind,
+    gitDirty: options.git.dirty,
+    lastCommitSha: options.lastCommitSha,
+    lastPullRequestUrl: options.lastPullRequestUrl,
+  })
+}
 
 export async function importWorkspace(options: {
   ownerId: string
@@ -75,13 +135,24 @@ export async function importWorkspace(options: {
       accessToken: options.githubAccessToken,
     })
 
-    return await convex.mutation(convexApi.buddypie.finalizeWorkspaceImport, {
+    const git = await getRepoGitState({
+      sandbox,
+      repoPath,
+    })
+
+    await convex.mutation(convexApi.buddypie.finalizeWorkspaceImport, {
       workspaceId: prepared.workspaceId,
       sandboxId: sandbox.id,
       sandboxName: sandbox.name,
       repoPath,
-      branch: repo.defaultBranch,
+      branch: git.currentBranch,
       previewUrlPattern: `${repoPath}:<port>`,
+    })
+
+    return await persistWorkspaceGitMetadata({
+      convex,
+      workspaceId: prepared.workspaceId,
+      git,
     })
   } catch (error) {
     await convex.mutation(convexApi.buddypie.failWorkspaceImport, {
@@ -97,22 +168,10 @@ export async function syncWorkspace(options: {
   requesterId: string
   githubAccessToken?: string
 }) {
-  const convex = await createServerConvexClient({ useViewerToken: false })
-  const workspace = await convex.query(convexApi.buddypie.workspaceForServer, {
+  const { convex, workspace, sandbox } = await getWorkspaceRuntimeContext({
     workspaceId: options.workspaceId,
     requesterId: options.requesterId,
   })
-
-  if (!workspace) {
-    throw new Error('Workspace not found')
-  }
-
-  if (!workspace.sandboxId || !workspace.repoPath) {
-    throw new Error('Workspace sandbox is not ready yet')
-  }
-
-  const sandbox = await getDaytonaClient().get(workspace.sandboxId)
-  await sandbox.start(60)
   await uploadBuddyPiAssets(sandbox)
   await syncRepoClone({
     sandbox,
@@ -120,10 +179,21 @@ export async function syncWorkspace(options: {
     accessToken: options.githubAccessToken,
   })
 
-  return await convex.mutation(convexApi.buddypie.recordWorkspaceSync, {
+  const git = await getRepoGitState({
+    sandbox,
+    repoPath: workspace.repoPath,
+  })
+
+  await convex.mutation(convexApi.buddypie.recordWorkspaceSync, {
     workspaceId: options.workspaceId,
-    branch: workspace.branch,
+    branch: git.currentBranch,
     status: 'ready',
+  })
+
+  return await persistWorkspaceGitMetadata({
+    convex,
+    workspaceId: options.workspaceId,
+    git,
   })
 }
 
@@ -149,13 +219,20 @@ export async function startWorkspaceRun(options: {
     throw new Error('Workspace sandbox is not ready yet')
   }
 
-  const agentProfile = getAgentProfile(options.agentSlug)
+  const agentConfig = await convex.query(convexApi.buddypie.agentRunConfig, {
+    agentSlug: options.agentSlug,
+  })
+  const agentProfile = agentConfig?.profile ?? getAgentProfile(options.agentSlug)
+  const providerId = agentConfig?.defaultModelConfig?.providerId
+  const modelId = agentConfig?.defaultModelConfig?.modelId
   const preparedRun = await convex.mutation(convexApi.buddypie.prepareRun, {
     ownerId: workspace.ownerId,
     workspaceId: options.workspaceId,
     agentSlug: options.agentSlug,
     sessionPath: getRemotePiSessionDir(String(options.workspaceId), options.agentSlug),
     priceUsd: agentProfile.priceUsd,
+    providerId,
+    modelId,
     lastPrompt: options.prompt,
     payerWallet: options.payerWallet,
     paymentReceipt: options.paymentReceipt,
@@ -179,6 +256,8 @@ export async function startWorkspaceRun(options: {
     repoPath: workspace.repoPath,
     repoFullName: workspace.repoFullName,
     prompt: options.prompt,
+    provider: providerId,
+    model: modelId,
   })
 
   await convex.mutation(convexApi.buddypie.updateRunTransport, {
@@ -350,17 +429,13 @@ export async function getPreviewLink(options: {
   requesterId: string
 }) {
   const convex = await createServerConvexClient({ useViewerToken: false })
-  const detail = await convex.query(convexApi.buddypie.workspaceDetail, {
+  const workspace = await convex.query(convexApi.buddypie.workspaceForServer, {
     workspaceId: options.workspaceId,
+    requesterId: options.requesterId,
   })
 
-  if (!detail?.workspace) {
+  if (!workspace) {
     throw new Error('Workspace not found')
-  }
-
-  const workspace = detail.workspace
-  if (workspace.ownerId !== options.requesterId && workspace.ownerId !== PLATFORM_OWNER_ID) {
-    throw new Error('Forbidden')
   }
 
   if (!workspace.sandboxId || !workspace.previewPort) {
@@ -377,6 +452,182 @@ export async function getPreviewLink(options: {
   return {
     url: signed.url,
     port: workspace.previewPort,
+  }
+}
+
+export async function getWorkspaceGitStatus(options: {
+  workspaceId: Id<'workspaces'>
+  requesterId: string
+}) {
+  const { convex, workspace, sandbox } = await getWorkspaceRuntimeContext(options)
+  const git = await getRepoGitState({
+    sandbox,
+    repoPath: workspace.repoPath,
+  })
+  const updatedWorkspace = await persistWorkspaceGitMetadata({
+    convex,
+    workspaceId: options.workspaceId,
+    git,
+  })
+
+  return {
+    workspace: updatedWorkspace,
+    git,
+  }
+}
+
+export async function createWorkspaceBranch(options: {
+  workspaceId: Id<'workspaces'>
+  requesterId: string
+  branchName: string
+  checkout?: boolean
+}) {
+  const { convex, workspace, sandbox } = await getWorkspaceRuntimeContext(options)
+  const created = await createRepoBranch({
+    sandbox,
+    repoPath: workspace.repoPath,
+    branchName: options.branchName,
+    checkout: options.checkout,
+  })
+  const updatedWorkspace = await persistWorkspaceGitMetadata({
+    convex,
+    workspaceId: options.workspaceId,
+    git: created.git,
+  })
+
+  return {
+    workspace: updatedWorkspace,
+    git: created.git,
+    branchName: created.branchName,
+  }
+}
+
+export async function commitWorkspaceChanges(options: {
+  workspaceId: Id<'workspaces'>
+  requesterId: string
+  message: string
+  files?: string[]
+  author: GitIdentity
+}) {
+  const { convex, workspace, sandbox } = await getWorkspaceRuntimeContext(options)
+  const gitBeforeCommit = await getRepoGitState({
+    sandbox,
+    repoPath: workspace.repoPath,
+  })
+
+  const files =
+    options.files && options.files.length > 0
+      ? Array.from(new Set(options.files))
+      : gitBeforeCommit.fileStatus.map((file) => file.name)
+
+  if (files.length === 0) {
+    throw new Error('No changed files are available to commit.')
+  }
+
+  const committed = await commitRepoChanges({
+    sandbox,
+    repoPath: workspace.repoPath,
+    files,
+    message: options.message,
+    author: options.author.name,
+    email: options.author.email,
+  })
+  const updatedWorkspace = await persistWorkspaceGitMetadata({
+    convex,
+    workspaceId: options.workspaceId,
+    git: committed.git,
+    lastCommitSha: committed.commitSha,
+  })
+
+  return {
+    workspace: updatedWorkspace,
+    git: committed.git,
+    commitSha: committed.commitSha,
+  }
+}
+
+export async function pushWorkspaceChanges(options: {
+  workspaceId: Id<'workspaces'>
+  requesterId: string
+  githubAccessToken?: string
+}) {
+  if (!options.githubAccessToken) {
+    throw new Error('GitHub access token is unavailable. Reconnect GitHub and try again.')
+  }
+
+  const { convex, workspace, sandbox } = await getWorkspaceRuntimeContext(options)
+  const git = await pushRepoChanges({
+    sandbox,
+    repoPath: workspace.repoPath,
+    accessToken: options.githubAccessToken,
+  })
+  const updatedWorkspace = await persistWorkspaceGitMetadata({
+    convex,
+    workspaceId: options.workspaceId,
+    git,
+  })
+
+  return {
+    workspace: updatedWorkspace,
+    git,
+  }
+}
+
+export async function createWorkspacePullRequest(options: {
+  workspaceId: Id<'workspaces'>
+  requesterId: string
+  title: string
+  body?: string
+  baseBranch?: string
+  draft?: boolean
+  githubAccessToken?: string
+}) {
+  if (!options.githubAccessToken) {
+    throw new Error('GitHub access token is unavailable. Reconnect GitHub and try again.')
+  }
+
+  const { convex, workspace, sandbox } = await getWorkspaceRuntimeContext(options)
+  let git = await getRepoGitState({
+    sandbox,
+    repoPath: workspace.repoPath,
+  })
+
+  if (git.ahead > 0 || !git.branchPublished) {
+    git = await pushRepoChanges({
+      sandbox,
+      repoPath: workspace.repoPath,
+      accessToken: options.githubAccessToken,
+    })
+  }
+
+  const repo = await fetchGitHubRepo(workspace.repoFullName, options.githubAccessToken)
+  const baseBranch = options.baseBranch ?? repo.defaultBranch
+
+  if (git.currentBranch === baseBranch) {
+    throw new Error('Create or checkout a codex/* branch before opening a pull request.')
+  }
+
+  const pullRequest = await createGitHubPullRequest({
+    repoFullName: workspace.repoFullName,
+    accessToken: options.githubAccessToken,
+    title: options.title,
+    body: options.body,
+    head: git.currentBranch,
+    base: baseBranch,
+    draft: options.draft,
+  })
+
+  const updatedWorkspace = await persistWorkspaceGitMetadata({
+    convex,
+    workspaceId: options.workspaceId,
+    git,
+    lastPullRequestUrl: pullRequest.url,
+  })
+
+  return {
+    workspace: updatedWorkspace,
+    git,
+    pullRequest,
   }
 }
 

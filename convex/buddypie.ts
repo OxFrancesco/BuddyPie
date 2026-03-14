@@ -1,8 +1,28 @@
 import { v } from 'convex/values'
+import {
+  DEFAULT_AGENT_MODEL_SELECTIONS,
+  createDefaultAgentModelCatalog,
+} from '../src/lib/pi-provider-catalog'
 import type { Doc, Id } from './_generated/dataModel'
 import { mutation, query } from './_generated/server'
 
 const PLATFORM_OWNER_ID = 'platform-public'
+const agentSlugValidator = v.union(v.literal('frontend'), v.literal('docs'))
+const agentModelCatalogEntryInput = v.object({
+  providerId: v.string(),
+  providerLabel: v.optional(v.string()),
+  modelId: v.string(),
+  modelLabel: v.optional(v.string()),
+  enabled: v.boolean(),
+  isDefault: v.boolean(),
+  authType: v.optional(v.string()),
+  api: v.optional(v.string()),
+  baseUrl: v.optional(v.string()),
+  apiKeyEnvNames: v.array(v.string()),
+  supportsReasoning: v.optional(v.boolean()),
+  supportsImages: v.optional(v.boolean()),
+  notes: v.optional(v.string()),
+})
 
 const DEFAULT_AGENT_PROFILES = [
   {
@@ -38,6 +58,7 @@ const DEFAULT_AGENT_PROFILES = [
       'Bias toward clear, maintainable documentation and concise written output.',
   },
 ] as const
+const DEFAULT_AGENT_MODEL_CATALOG = createDefaultAgentModelCatalog()
 
 async function ensureDefaultProfiles(ctx: any) {
   const now = Date.now()
@@ -48,10 +69,6 @@ async function ensureDefaultProfiles(ctx: any) {
       .unique()
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
-        ...profile,
-        updatedAt: now,
-      })
       continue
     }
 
@@ -60,6 +77,114 @@ async function ensureDefaultProfiles(ctx: any) {
       updatedAt: now,
     })
   }
+}
+
+async function ensureDefaultAgentModelCatalog(ctx: any) {
+  const now = Date.now()
+
+  for (const profile of DEFAULT_AGENT_PROFILES) {
+    for (const entry of DEFAULT_AGENT_MODEL_CATALOG) {
+      const defaultSelection =
+        DEFAULT_AGENT_MODEL_SELECTIONS[
+          profile.slug as keyof typeof DEFAULT_AGENT_MODEL_SELECTIONS
+        ]
+      const seededEntry = {
+        ...entry,
+        isDefault:
+          defaultSelection?.providerId === entry.providerId &&
+          defaultSelection?.modelId === entry.modelId,
+      }
+      const existing = await ctx.db
+        .query('agentModelCatalog')
+        .withIndex('by_agent', (q: any) =>
+          q
+            .eq('agentSlug', profile.slug)
+            .eq('providerId', seededEntry.providerId)
+            .eq('modelId', seededEntry.modelId),
+        )
+        .unique()
+
+      if (existing) {
+        continue
+      }
+
+      await ctx.db.insert('agentModelCatalog', {
+        agentSlug: profile.slug,
+        ...seededEntry,
+        updatedAt: now,
+      })
+    }
+  }
+}
+
+async function getAgentModelCatalog(ctx: any, agentSlug: 'frontend' | 'docs') {
+  return (await ctx.db
+    .query('agentModelCatalog')
+    .withIndex('by_agent', (q: any) => q.eq('agentSlug', agentSlug))
+    .collect()
+  ).sort((left: any, right: any) => {
+    if (left.providerId === right.providerId) {
+      return left.modelId.localeCompare(right.modelId)
+    }
+
+    return left.providerId.localeCompare(right.providerId)
+  })
+}
+
+async function upsertAgentModelCatalogEntry(
+  ctx: any,
+  agentSlug: 'frontend' | 'docs',
+  entry: any,
+) {
+  const existing = await ctx.db
+    .query('agentModelCatalog')
+    .withIndex('by_agent', (q: any) =>
+      q
+        .eq('agentSlug', agentSlug)
+        .eq('providerId', entry.providerId)
+        .eq('modelId', entry.modelId),
+    )
+    .unique()
+
+  if (entry.isDefault) {
+    const currentDefaults = await ctx.db
+      .query('agentModelCatalog')
+      .withIndex('by_agent_default', (q: any) =>
+        q.eq('agentSlug', agentSlug).eq('isDefault', true),
+      )
+      .collect()
+
+    for (const currentDefault of currentDefaults) {
+      if (
+        currentDefault.providerId === entry.providerId &&
+        currentDefault.modelId === entry.modelId
+      ) {
+        continue
+      }
+
+      await ctx.db.patch(currentDefault._id, {
+        isDefault: false,
+        updatedAt: Date.now(),
+      })
+    }
+  }
+
+  const now = Date.now()
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      ...entry,
+      updatedAt: now,
+    })
+    return await ctx.db.get(existing._id)
+  }
+
+  const recordId = await ctx.db.insert('agentModelCatalog', {
+    agentSlug,
+    ...entry,
+    updatedAt: now,
+  })
+
+  return await ctx.db.get(recordId)
 }
 
 function toDashboardWorkspace(workspace: Doc<'workspaces'>, runs: Array<Doc<'runs'>>) {
@@ -86,7 +211,11 @@ async function getWorkspaceWithAccess(
     return null
   }
 
-  if (workspace.ownerId !== PLATFORM_OWNER_ID && viewerId && workspace.ownerId !== viewerId) {
+  if (workspace.ownerId === PLATFORM_OWNER_ID) {
+    return workspace
+  }
+
+  if (!viewerId || workspace.ownerId !== viewerId) {
     return null
   }
 
@@ -97,6 +226,105 @@ export const seedAgentProfiles = mutation({
   args: {},
   handler: async (ctx) => {
     await ensureDefaultProfiles(ctx)
+    await ensureDefaultAgentModelCatalog(ctx)
+    return true
+  },
+})
+
+export const agentRunConfig = query({
+  args: {
+    agentSlug: agentSlugValidator,
+  },
+  handler: async (ctx, { agentSlug }) => {
+    const profile = await ctx.db
+      .query('agentProfiles')
+      .withIndex('by_slug', (q) => q.eq('slug', agentSlug))
+      .unique()
+
+    const modelCatalog = await getAgentModelCatalog(ctx, agentSlug)
+
+    return {
+      profile,
+      modelCatalog,
+      defaultModelConfig:
+        modelCatalog.find((entry: any) => entry.enabled && entry.isDefault) ?? null,
+    }
+  },
+})
+
+export const agentModelCatalogByAgent = query({
+  args: {
+    agentSlug: agentSlugValidator,
+  },
+  handler: async (ctx, { agentSlug }) => {
+    return getAgentModelCatalog(ctx, agentSlug)
+  },
+})
+
+export const upsertAgentModelConfig = mutation({
+  args: {
+    agentSlug: agentSlugValidator,
+    entry: agentModelCatalogEntryInput,
+  },
+  handler: async (ctx, { agentSlug, entry }) => {
+    return await upsertAgentModelCatalogEntry(ctx, agentSlug, entry)
+  },
+})
+
+export const replaceAgentModelCatalog = mutation({
+  args: {
+    agentSlug: agentSlugValidator,
+    entries: v.array(agentModelCatalogEntryInput),
+  },
+  handler: async (ctx, { agentSlug, entries }) => {
+    const defaultEntries = entries.filter((entry) => entry.isDefault)
+    if (defaultEntries.length > 1) {
+      throw new Error('Only one default provider/model can be set per agent')
+    }
+
+    const existing = await ctx.db
+      .query('agentModelCatalog')
+      .withIndex('by_agent', (q) => q.eq('agentSlug', agentSlug))
+      .collect()
+
+    const incomingKeys = new Set(
+      entries.map((entry) => `${entry.providerId}::${entry.modelId}`),
+    )
+
+    for (const existingEntry of existing) {
+      const key = `${existingEntry.providerId}::${existingEntry.modelId}`
+      if (!incomingKeys.has(key)) {
+        await ctx.db.delete(existingEntry._id)
+      }
+    }
+
+    for (const entry of entries) {
+      await upsertAgentModelCatalogEntry(ctx, agentSlug, entry)
+    }
+
+    return await getAgentModelCatalog(ctx, agentSlug)
+  },
+})
+
+export const removeAgentModelConfig = mutation({
+  args: {
+    agentSlug: agentSlugValidator,
+    providerId: v.string(),
+    modelId: v.string(),
+  },
+  handler: async (ctx, { agentSlug, providerId, modelId }) => {
+    const existing = await ctx.db
+      .query('agentModelCatalog')
+      .withIndex('by_agent', (q) =>
+        q.eq('agentSlug', agentSlug).eq('providerId', providerId).eq('modelId', modelId),
+      )
+      .unique()
+
+    if (!existing) {
+      return null
+    }
+
+    await ctx.db.delete(existing._id)
     return true
   },
 })
@@ -327,7 +555,6 @@ export const prepareWorkspaceImport = mutation({
         repositoryId: repository._id,
         repoUrl: args.repoUrl,
         cloneUrl: args.cloneUrl,
-        branch: args.defaultBranch,
         status:
           existingWorkspace.sandboxId && existingWorkspace.status === 'ready'
             ? existingWorkspace.status
@@ -431,13 +658,35 @@ export const recordWorkspaceSync = mutation({
   },
 })
 
+export const recordWorkspaceGitMetadata = mutation({
+  args: {
+    workspaceId: v.id('workspaces'),
+    branch: v.optional(v.string()),
+    gitBranchPublished: v.optional(v.boolean()),
+    gitAhead: v.optional(v.number()),
+    gitBehind: v.optional(v.number()),
+    gitDirty: v.optional(v.boolean()),
+    lastCommitSha: v.optional(v.string()),
+    lastPullRequestUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, { workspaceId, ...patch }) => {
+    await ctx.db.patch(workspaceId, {
+      ...patch,
+      updatedAt: Date.now(),
+    })
+    return await ctx.db.get(workspaceId)
+  },
+})
+
 export const prepareRun = mutation({
   args: {
     ownerId: v.string(),
     workspaceId: v.id('workspaces'),
-    agentSlug: v.union(v.literal('frontend'), v.literal('docs')),
+    agentSlug: agentSlugValidator,
     sessionPath: v.string(),
     priceUsd: v.number(),
+    providerId: v.optional(v.string()),
+    modelId: v.optional(v.string()),
     lastPrompt: v.optional(v.string()),
     payerWallet: v.optional(v.string()),
     paymentReceipt: v.optional(v.any()),
@@ -473,6 +722,8 @@ export const prepareRun = mutation({
       ownerId: args.ownerId,
       workspaceId: args.workspaceId,
       agentSlug: args.agentSlug,
+      providerId: args.providerId,
+      modelId: args.modelId,
       status: 'starting',
       sessionPath: args.sessionPath,
       lastPrompt: args.lastPrompt,

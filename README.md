@@ -26,14 +26,21 @@ bun install
 ```
 
 2. Copy `.env.example` to `.env` and fill in the required values.
+   The repo scripts also auto-load `.env.local`, which is convenient for local Daytona and E2E runs.
 
 3. In Clerk, enable GitHub login and request GitHub scopes for repo import:
    `repo`
    `read:org` if you need org repo visibility
 
-4. Make sure your Daytona snapshot already contains the `pi` CLI, or override `PI_COMMAND`.
+4. Create the Daytona snapshot that BuddyPie expects:
 
-5. Start Convex and the app:
+```bash
+bun run snapshot:create --verify
+```
+
+5. If you prefer a different snapshot name, set `DAYTONA_SNAPSHOT` and create that snapshot instead.
+
+6. Start Convex and the app:
 
 ```bash
 bun run dev
@@ -46,7 +53,7 @@ bun run dev
 - `CLERK_SECRET_KEY`
 - `CLERK_JWT_ISSUER_DOMAIN`
 - `DAYTONA_API_KEY`
-- `BUDDYPIE_X402_PAY_TO`
+- `BUDDYPIE_X402_PAY_TO` - Base Sepolia `0x...` address that receives x402 payments
 - `BUDDYPIE_PUBLIC_URL`
 
 ## Useful envs
@@ -57,9 +64,53 @@ bun run dev
 - `PI_COMMAND`
 - `PI_PROVIDER`
 - `PI_MODEL`
+- `X402_FACILITATOR_URL` - defaults to `https://x402.org/facilitator`
 - `BASE_SEPOLIA_RPC_URL`
 - `PRIVATE_KEY`
 - `PINATA_JWT`
+- `BUDDYPIE_E2E_GITHUB_REPO`
+- `BUDDYPIE_E2E_GITHUB_TOKEN`
+
+## Daytona snapshot lifecycle
+
+BuddyPie now ships a repo-local Daytona snapshot script for the expected `buddypie-pi-base-v2` image:
+
+```bash
+bun run snapshot:create
+```
+
+Useful flags:
+
+- `--verify` creates an ephemeral sandbox from the snapshot and checks `node`, `npm`, `pnpm`, `bun`, `git`, `python3`, `rg`, and `pi`
+- `--replace` deletes and recreates the snapshot with the same name
+- `--name`, `--image`, `--cpu`, `--memory`, `--disk` override the defaults
+
+## Daytona E2E
+
+There is now a live Daytona E2E script that exercises:
+
+- snapshot provisioning / verification
+- sandbox creation
+- repo clone
+- Daytona git branch / commit / push
+- GitHub pull request creation when a writable token is available
+- PI RPC startup and preview URL detection
+
+Run it with:
+
+```bash
+bun run e2e:daytona
+```
+
+Useful flags:
+
+- `--repo owner/repo`
+- `--replace-snapshot`
+- `--skip-pr`
+- `--skip-pi`
+- `--keep-sandbox`
+
+The script writes a JSON report under `artifacts/`.
 
 ## Registration
 

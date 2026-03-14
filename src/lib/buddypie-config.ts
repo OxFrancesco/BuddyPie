@@ -12,6 +12,7 @@ export const BUDDYPIE_REMOTE_PI_ASSETS_DIR = `${BUDDYPIE_REMOTE_DIR}/pi-assets`
 export const BUDDYPIE_REMOTE_PI_SESSIONS_DIR = `${BUDDYPIE_REMOTE_DIR}/sessions`
 
 export type AgentSlug = 'frontend' | 'docs'
+export type AgentSkillSetId = string
 
 export type AgentProfile = {
   slug: AgentSlug
@@ -25,6 +26,7 @@ export type AgentProfile = {
   chain: string
   oasfDomains: string[]
   oasfSkills: string[]
+  skillSet: AgentSkillSetId[]
   promptHint: string
 }
 
@@ -42,6 +44,7 @@ export const PLATFORM_AGENT_PROFILES: AgentProfile[] = [
     chain: BASE_SEPOLIA_CAIP2,
     oasfDomains: ['technology/software_engineering', 'design/user_interfaces'],
     oasfSkills: ['frontend_development', 'developer_documentation'],
+    skillSet: ['common', 'frontend'],
     promptHint:
       'Start by understanding the running app, then bias toward a working preview URL and crisp visual polish.',
   },
@@ -58,6 +61,7 @@ export const PLATFORM_AGENT_PROFILES: AgentProfile[] = [
     chain: BASE_SEPOLIA_CAIP2,
     oasfDomains: ['technology/software_engineering', 'education/technical_writing'],
     oasfSkills: ['developer_documentation', 'documentation_maintenance'],
+    skillSet: ['common', 'docs'],
     promptHint:
       'Prefer accurate, maintainable documentation that reflects the current codebase instead of aspirational docs.',
   },

@@ -259,8 +259,22 @@ export async function withX402Protection(
   })
 }
 
+function formatX402ConfigMessage(details: string) {
+  if (details.includes('BUDDYPIE_X402_PAY_TO')) {
+    return 'x402 configuration error: set BUDDYPIE_X402_PAY_TO to the Base Sepolia address that should receive BuddyPie payments.'
+  }
+
+  if (details.includes('X402_FACILITATOR_URL')) {
+    return 'x402 configuration error: set X402_FACILITATOR_URL to a reachable facilitator endpoint, such as https://x402.org/facilitator.'
+  }
+
+  return `x402 configuration error: ${details}`
+}
+
 export function x402ConfigError(error: unknown) {
-  return errorJson(500, 'x402 configuration error', {
-    details: error instanceof Error ? error.message : String(error),
+  const details = error instanceof Error ? error.message : String(error)
+
+  return errorJson(500, formatX402ConfigMessage(details), {
+    details,
   })
 }

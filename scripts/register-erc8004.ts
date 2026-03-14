@@ -1,6 +1,7 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { SDK } from 'agent0-sdk'
 import { api } from '../convex/_generated/api'
+import { loadProjectEnv } from './_shared/project-env'
 import {
   buildAgentCard,
   buildAgentRegistration,
@@ -13,6 +14,8 @@ import {
   type AgentSlug,
   getAgentProfile,
 } from '../src/lib/buddypie-config'
+
+loadProjectEnv()
 
 function requireEnv(name: string) {
   const value = process.env[name]

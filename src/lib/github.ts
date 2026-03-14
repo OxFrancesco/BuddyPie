@@ -11,6 +11,16 @@ export type GitHubRepoSummary = {
   updatedAt: string
 }
 
+export type GitHubPullRequestSummary = {
+  number: number
+  url: string
+  state: string
+  draft: boolean
+  title: string
+  head: string
+  base: string
+}
+
 function githubHeaders(accessToken?: string) {
   return {
     Accept: 'application/vnd.github+json',
@@ -116,4 +126,58 @@ export async function listGitHubRepos(accessToken: string) {
         updatedAt: repo.updated_at,
       }) satisfies GitHubRepoSummary,
   )
+}
+
+async function parseGitHubError(response: Response) {
+  try {
+    const payload = await response.json()
+    return typeof payload.message === 'string' ? payload.message : null
+  } catch {
+    return null
+  }
+}
+
+export async function createGitHubPullRequest(options: {
+  repoFullName: string
+  accessToken: string
+  title: string
+  body?: string
+  head: string
+  base: string
+  draft?: boolean
+}) {
+  const response = await fetch(`https://api.github.com/repos/${options.repoFullName}/pulls`, {
+    method: 'POST',
+    headers: {
+      ...githubHeaders(options.accessToken),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      title: options.title,
+      body: options.body,
+      head: options.head,
+      base: options.base,
+      draft: options.draft ?? false,
+    }),
+  })
+
+  if (!response.ok) {
+    const message = await parseGitHubError(response)
+    throw new Error(
+      message
+        ? `GitHub pull request creation failed: ${message}`
+        : `GitHub pull request creation failed with ${response.status}`,
+    )
+  }
+
+  const pullRequest = await response.json()
+  return {
+    number: pullRequest.number as number,
+    url: pullRequest.html_url as string,
+    state: pullRequest.state as string,
+    draft: pullRequest.draft as boolean,
+    title: pullRequest.title as string,
+    head: pullRequest.head?.ref as string,
+    base: pullRequest.base?.ref as string,
+  } satisfies GitHubPullRequestSummary
 }

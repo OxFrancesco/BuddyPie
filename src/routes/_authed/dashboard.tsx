@@ -2,7 +2,7 @@ import * as React from 'react'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery } from 'convex/react'
 import { api as generatedApi } from '../../../convex/_generated/api'
-import { shortAddress, useWallet } from '~/components/wallet-provider'
+
 import { Button } from '~/components/ui/button'
 import { Badge } from '~/components/ui/badge'
 import { Input } from '~/components/ui/input'
@@ -24,6 +24,23 @@ type RepoSummary = {
   description: string | null
 }
 
+function getApiErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== 'object') {
+    return fallback
+  }
+
+  const error =
+    'error' in payload && typeof payload.error === 'string' ? payload.error : null
+  const details =
+    'details' in payload && typeof payload.details === 'string' ? payload.details : null
+
+  if (error && details && !error.includes(details)) {
+    return `${error} ${details}`
+  }
+
+  return error ?? details ?? fallback
+}
+
 export const Route = createFileRoute('/_authed/dashboard')({
   component: DashboardPage,
 })
@@ -31,7 +48,6 @@ export const Route = createFileRoute('/_authed/dashboard')({
 function DashboardPage() {
   const navigate = useNavigate()
   const dashboard = useQuery(api.buddypie.dashboard, {})
-  const wallet = useWallet()
   const [repos, setRepos] = React.useState<RepoSummary[]>([])
   const [repoInput, setRepoInput] = React.useState('')
   const [loadingRepos, setLoadingRepos] = React.useState(false)
@@ -50,7 +66,7 @@ function DashboardPage() {
         })
         const payload = await response.json()
         if (!response.ok) {
-          throw new Error(payload.error ?? 'Failed to load GitHub repos')
+          throw new Error(getApiErrorMessage(payload, 'Failed to load GitHub repos'))
         }
         if (!cancelled) {
           setRepos(payload.repos)
@@ -86,7 +102,7 @@ function DashboardPage() {
       })
       const payload = await response.json()
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Import failed')
+        throw new Error(getApiErrorMessage(payload, 'Import failed'))
       }
       await navigate({
         to: '/workspaces/$workspaceId',
@@ -106,14 +122,7 @@ function DashboardPage() {
         <p className="text-sm text-muted-foreground">
           Import a repository and boot a paid agent run.
         </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="font-mono text-xs">
-            Wallet: {wallet.account ? shortAddress(wallet.account) : 'not connected'}
-          </Badge>
-          <Badge variant="outline" className="font-mono text-xs">
-            Profiles: {dashboard?.agentProfiles?.length ?? 0}
-          </Badge>
-        </div>
+
       </div>
 
       <Separator />
@@ -190,7 +199,7 @@ function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Platform agents</CardTitle>
+            <CardTitle>Pies Agents</CardTitle>
             <CardDescription>Agent profiles available for paid runs.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -205,7 +214,7 @@ function DashboardPage() {
                     <Badge variant="secondary">{profile.priceLabel}</Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">{profile.description}</p>
-                  <p className="font-mono text-xs text-muted-foreground">{profile.chain}</p>
+
                 </div>
               ))}
             </div>

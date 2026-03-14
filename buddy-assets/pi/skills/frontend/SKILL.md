@@ -18,4 +18,5 @@ Your primary goal is to make the repository easier to preview in a browser.
 ## Preview Bias
 
 - Prefer changes that unblock `npm run dev`, `pnpm dev`, `bun dev`, or equivalent.
-- If a preview server starts successfully, print the local port clearly.
+- If you start a preview server, verify it responds locally before you claim success.
+- When the server is healthy, print the local URL and port clearly.

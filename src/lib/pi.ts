@@ -27,10 +27,10 @@ export function getRemoteRepoPath(repoFullName: string) {
 }
 
 export function getRemoteAgentSkillPaths(agentSlug: AgentSlug) {
-  return [
-    `${BUDDYPIE_REMOTE_PI_ASSETS_DIR}/skills/common/SKILL.md`,
-    `${BUDDYPIE_REMOTE_PI_ASSETS_DIR}/skills/${agentSlug}/SKILL.md`,
-  ]
+  const profile = getAgentProfile(agentSlug)
+  return Array.from(new Set(profile.skillSet)).map(
+    (skillSetId) => `${BUDDYPIE_REMOTE_PI_ASSETS_DIR}/skills/${skillSetId}/SKILL.md`,
+  )
 }
 
 export function getRemoteAgentExtensionPaths(agentSlug: AgentSlug) {
@@ -58,6 +58,7 @@ export function buildPiRpcCommand(options: {
   provider?: string
   model?: string
   command?: string
+  envVars?: Record<string, string>
 }) {
   const skillFlags = getRemoteAgentSkillPaths(options.agentSlug)
     .map((skillPath) => `--skill ${quoteShell(skillPath)}`)
@@ -74,9 +75,14 @@ export function buildPiRpcCommand(options: {
     .filter(Boolean)
     .join(' ')
 
+  const envPrefix = Object.entries(options.envVars ?? {})
+    .filter(([, value]) => value.length > 0)
+    .map(([key, value]) => `${key}=${quoteShell(value)}`)
+    .join(' ')
+
   return [
     `cd ${quoteShell(options.repoPath)}`,
-    `${options.command ?? 'pi'} --mode rpc --no-skills --no-extensions --session-dir ${quoteShell(options.sessionDir)} ${providerFlags} ${skillFlags} ${extensionFlags}`.trim(),
+    `${envPrefix ? `${envPrefix} ` : ''}${options.command ?? 'pi'} --mode rpc --no-skills --no-extensions --session-dir ${quoteShell(options.sessionDir)} ${providerFlags} ${skillFlags} ${extensionFlags}`.trim(),
   ].join(' && ')
 }
 

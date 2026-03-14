@@ -18,9 +18,31 @@ import {
   LOCAL_PI_ASSETS_DIR,
   parsePiRpcOutput,
 } from './pi'
+import { formatMissingBuddyPieSnapshotError } from './daytona-snapshot'
+import {
+  PI_RUNTIME_ENV_NAMES,
+  hasPiProviderCredentialsFromEnv,
+} from './pi-provider-catalog'
 import { getServerEnv, requireDaytonaApiKey } from './server-env'
 
 let cachedDaytona: Daytona | null = null
+
+export type WorkspaceGitFileState = {
+  name: string
+  staging: string
+  worktree: string
+  extra: string
+}
+
+export type WorkspaceGitState = {
+  currentBranch: string
+  ahead: number
+  behind: number
+  branchPublished: boolean
+  dirty: boolean
+  branches: string[]
+  fileStatus: WorkspaceGitFileState[]
+}
 
 export function getDaytonaClient() {
   if (cachedDaytona) {
@@ -47,6 +69,18 @@ export function buildWorkspaceLabels(options: {
     workspaceId: options.workspaceId,
     repo: repoSlug(options.repoFullName),
   }
+}
+
+export function getPiRuntimeEnv() {
+  return Object.fromEntries(
+    PI_RUNTIME_ENV_NAMES.flatMap((name) =>
+      process.env[name] ? [[name, process.env[name]!]] : [],
+    ),
+  )
+}
+
+export function hasPiProviderCredentials(provider?: string) {
+  return hasPiProviderCredentialsFromEnv(provider, process.env)
 }
 
 async function ensureFolder(sandbox: Sandbox, remotePath: string) {
@@ -109,6 +143,12 @@ export async function ensureSandbox(options: {
     return existing
   }
 
+  try {
+    await daytona.snapshot.get(env.daytonaSnapshot)
+  } catch {
+    throw new Error(formatMissingBuddyPieSnapshotError(env.daytonaSnapshot))
+  }
+
   const sandbox = await daytona.create(
     {
       snapshot: env.daytonaSnapshot,
@@ -167,6 +207,119 @@ export async function syncRepoClone(options: {
   )
 }
 
+function normalizeGitBranchName(value: string) {
+  const sanitized = value
+    .trim()
+    .replace(/^refs\/heads\//, '')
+    .replace(/^origin\//, '')
+    .replace(/\s+/g, '-')
+
+  if (!sanitized) {
+    throw new Error('Branch name cannot be empty')
+  }
+
+  return sanitized.startsWith('codex/') ? sanitized : `codex/${sanitized}`
+}
+
+export async function getRepoGitState(options: {
+  sandbox: Sandbox
+  repoPath: string
+}) {
+  const [status, branches] = await Promise.all([
+    options.sandbox.git.status(options.repoPath),
+    options.sandbox.git.branches(options.repoPath),
+  ])
+
+  return {
+    currentBranch: status.currentBranch,
+    ahead: status.ahead ?? 0,
+    behind: status.behind ?? 0,
+    branchPublished: Boolean(status.branchPublished),
+    dirty: status.fileStatus.length > 0,
+    branches: branches.branches,
+    fileStatus: status.fileStatus.map((file) => ({
+      name: file.name,
+      staging: String(file.staging),
+      worktree: String(file.worktree),
+      extra: file.extra,
+    })),
+  } satisfies WorkspaceGitState
+}
+
+export async function createRepoBranch(options: {
+  sandbox: Sandbox
+  repoPath: string
+  branchName: string
+  checkout?: boolean
+}) {
+  const branchName = normalizeGitBranchName(options.branchName)
+  const existingBranches = await options.sandbox.git.branches(options.repoPath)
+
+  if (!existingBranches.branches.includes(branchName)) {
+    await options.sandbox.git.createBranch(options.repoPath, branchName)
+  }
+
+  if (options.checkout !== false) {
+    await options.sandbox.git.checkoutBranch(options.repoPath, branchName)
+  }
+
+  return {
+    branchName,
+    git: await getRepoGitState({
+      sandbox: options.sandbox,
+      repoPath: options.repoPath,
+    }),
+  }
+}
+
+export async function commitRepoChanges(options: {
+  sandbox: Sandbox
+  repoPath: string
+  files: string[]
+  message: string
+  author: string
+  email: string
+  allowEmpty?: boolean
+}) {
+  if (options.files.length === 0) {
+    throw new Error('No files were selected for commit')
+  }
+
+  await options.sandbox.git.add(options.repoPath, options.files)
+  const commit = await options.sandbox.git.commit(
+    options.repoPath,
+    options.message,
+    options.author,
+    options.email,
+    options.allowEmpty,
+  )
+
+  return {
+    commitSha: commit.sha,
+    git: await getRepoGitState({
+      sandbox: options.sandbox,
+      repoPath: options.repoPath,
+    }),
+  }
+}
+
+export async function pushRepoChanges(options: {
+  sandbox: Sandbox
+  repoPath: string
+  accessToken?: string
+}) {
+  await options.sandbox.git.push(
+    options.repoPath,
+    options.accessToken ? 'x-access-token' : undefined,
+    options.accessToken,
+  )
+
+  return getRepoGitState({
+    sandbox: options.sandbox,
+    repoPath: options.repoPath,
+  })
+}
+
 export async function startPiRun(options: {
   sandbox: Sandbox
   runId: string
@@ -175,6 +328,8 @@ export async function startPiRun(options: {
   repoPath: string
   repoFullName: string
   prompt: string
+  provider?: string
+  model?: string
 }) {
   const env = getServerEnv()
   const sandboxSessionId = `buddypie-${options.runId}`
@@ -195,9 +350,10 @@ export async function startPiRun(options: {
         agentSlug: options.agentSlug,
         repoPath: options.repoPath,
         sessionDir,
-        provider: env.piProvider,
-        model: env.piModel,
+        provider: options.provider ?? env.piProvider,
+        model: options.model ?? env.piModel,
         command: env.piCommand,
+        envVars: getPiRuntimeEnv(),
       }),
       runAsync: true,
       suppressInputEcho: true,

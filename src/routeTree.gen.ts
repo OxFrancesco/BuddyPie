@@ -30,6 +30,11 @@ import { Route as ApiRunsRunIdRefreshRouteImport } from './routes/api/runs/$runI
 import { Route as ApiRunsRunIdMessagesRouteImport } from './routes/api/runs/$runId/messages'
 import { Route as ApiRunsRunIdAbortRouteImport } from './routes/api/runs/$runId/abort'
 import { Route as AgentsSlugDotwellKnownAgentCardDotjsonRouteImport } from './routes/agents/$slug/[.]well-known/agent-card[.]json'
+import { Route as ApiWorkspacesWorkspaceIdGitStatusRouteImport } from './routes/api/workspaces/$workspaceId/git/status'
+import { Route as ApiWorkspacesWorkspaceIdGitPushRouteImport } from './routes/api/workspaces/$workspaceId/git/push'
+import { Route as ApiWorkspacesWorkspaceIdGitPullRequestRouteImport } from './routes/api/workspaces/$workspaceId/git/pull-request'
+import { Route as ApiWorkspacesWorkspaceIdGitCommitRouteImport } from './routes/api/workspaces/$workspaceId/git/commit'
+import { Route as ApiWorkspacesWorkspaceIdGitBranchRouteImport } from './routes/api/workspaces/$workspaceId/git/branch'
 
 const SsoCallbackRoute = SsoCallbackRouteImport.update({
   id: '/sso-callback',
@@ -141,6 +146,36 @@ const AgentsSlugDotwellKnownAgentCardDotjsonRoute =
     path: '/agents/$slug/.well-known/agent-card.json',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiWorkspacesWorkspaceIdGitStatusRoute =
+  ApiWorkspacesWorkspaceIdGitStatusRouteImport.update({
+    id: '/api/workspaces/$workspaceId/git/status',
+    path: '/api/workspaces/$workspaceId/git/status',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkspacesWorkspaceIdGitPushRoute =
+  ApiWorkspacesWorkspaceIdGitPushRouteImport.update({
+    id: '/api/workspaces/$workspaceId/git/push',
+    path: '/api/workspaces/$workspaceId/git/push',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkspacesWorkspaceIdGitPullRequestRoute =
+  ApiWorkspacesWorkspaceIdGitPullRequestRouteImport.update({
+    id: '/api/workspaces/$workspaceId/git/pull-request',
+    path: '/api/workspaces/$workspaceId/git/pull-request',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkspacesWorkspaceIdGitCommitRoute =
+  ApiWorkspacesWorkspaceIdGitCommitRouteImport.update({
+    id: '/api/workspaces/$workspaceId/git/commit',
+    path: '/api/workspaces/$workspaceId/git/commit',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkspacesWorkspaceIdGitBranchRoute =
+  ApiWorkspacesWorkspaceIdGitBranchRouteImport.update({
+    id: '/api/workspaces/$workspaceId/git/branch',
+    path: '/api/workspaces/$workspaceId/git/branch',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -163,6 +198,11 @@ export interface FileRoutesByFullPath {
   '/api/workspaces/$workspaceId/preview-link': typeof ApiWorkspacesWorkspaceIdPreviewLinkRoute
   '/api/workspaces/$workspaceId/runs': typeof ApiWorkspacesWorkspaceIdRunsRoute
   '/api/workspaces/$workspaceId/sync': typeof ApiWorkspacesWorkspaceIdSyncRoute
+  '/api/workspaces/$workspaceId/git/branch': typeof ApiWorkspacesWorkspaceIdGitBranchRoute
+  '/api/workspaces/$workspaceId/git/commit': typeof ApiWorkspacesWorkspaceIdGitCommitRoute
+  '/api/workspaces/$workspaceId/git/pull-request': typeof ApiWorkspacesWorkspaceIdGitPullRequestRoute
+  '/api/workspaces/$workspaceId/git/push': typeof ApiWorkspacesWorkspaceIdGitPushRoute
+  '/api/workspaces/$workspaceId/git/status': typeof ApiWorkspacesWorkspaceIdGitStatusRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -185,6 +225,11 @@ export interface FileRoutesByTo {
   '/api/workspaces/$workspaceId/preview-link': typeof ApiWorkspacesWorkspaceIdPreviewLinkRoute
   '/api/workspaces/$workspaceId/runs': typeof ApiWorkspacesWorkspaceIdRunsRoute
   '/api/workspaces/$workspaceId/sync': typeof ApiWorkspacesWorkspaceIdSyncRoute
+  '/api/workspaces/$workspaceId/git/branch': typeof ApiWorkspacesWorkspaceIdGitBranchRoute
+  '/api/workspaces/$workspaceId/git/commit': typeof ApiWorkspacesWorkspaceIdGitCommitRoute
+  '/api/workspaces/$workspaceId/git/pull-request': typeof ApiWorkspacesWorkspaceIdGitPullRequestRoute
+  '/api/workspaces/$workspaceId/git/push': typeof ApiWorkspacesWorkspaceIdGitPushRoute
+  '/api/workspaces/$workspaceId/git/status': typeof ApiWorkspacesWorkspaceIdGitStatusRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -209,6 +254,11 @@ export interface FileRoutesById {
   '/api/workspaces/$workspaceId/preview-link': typeof ApiWorkspacesWorkspaceIdPreviewLinkRoute
   '/api/workspaces/$workspaceId/runs': typeof ApiWorkspacesWorkspaceIdRunsRoute
   '/api/workspaces/$workspaceId/sync': typeof ApiWorkspacesWorkspaceIdSyncRoute
+  '/api/workspaces/$workspaceId/git/branch': typeof ApiWorkspacesWorkspaceIdGitBranchRoute
+  '/api/workspaces/$workspaceId/git/commit': typeof ApiWorkspacesWorkspaceIdGitCommitRoute
+  '/api/workspaces/$workspaceId/git/pull-request': typeof ApiWorkspacesWorkspaceIdGitPullRequestRoute
+  '/api/workspaces/$workspaceId/git/push': typeof ApiWorkspacesWorkspaceIdGitPushRoute
+  '/api/workspaces/$workspaceId/git/status': typeof ApiWorkspacesWorkspaceIdGitStatusRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -233,6 +283,11 @@ export interface FileRouteTypes {
     | '/api/workspaces/$workspaceId/preview-link'
     | '/api/workspaces/$workspaceId/runs'
     | '/api/workspaces/$workspaceId/sync'
+    | '/api/workspaces/$workspaceId/git/branch'
+    | '/api/workspaces/$workspaceId/git/commit'
+    | '/api/workspaces/$workspaceId/git/pull-request'
+    | '/api/workspaces/$workspaceId/git/push'
+    | '/api/workspaces/$workspaceId/git/status'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -255,6 +310,11 @@ export interface FileRouteTypes {
     | '/api/workspaces/$workspaceId/preview-link'
     | '/api/workspaces/$workspaceId/runs'
     | '/api/workspaces/$workspaceId/sync'
+    | '/api/workspaces/$workspaceId/git/branch'
+    | '/api/workspaces/$workspaceId/git/commit'
+    | '/api/workspaces/$workspaceId/git/pull-request'
+    | '/api/workspaces/$workspaceId/git/push'
+    | '/api/workspaces/$workspaceId/git/status'
   id:
     | '__root__'
     | '/'
@@ -278,6 +338,11 @@ export interface FileRouteTypes {
     | '/api/workspaces/$workspaceId/preview-link'
     | '/api/workspaces/$workspaceId/runs'
     | '/api/workspaces/$workspaceId/sync'
+    | '/api/workspaces/$workspaceId/git/branch'
+    | '/api/workspaces/$workspaceId/git/commit'
+    | '/api/workspaces/$workspaceId/git/pull-request'
+    | '/api/workspaces/$workspaceId/git/push'
+    | '/api/workspaces/$workspaceId/git/status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -299,6 +364,11 @@ export interface RootRouteChildren {
   ApiWorkspacesWorkspaceIdPreviewLinkRoute: typeof ApiWorkspacesWorkspaceIdPreviewLinkRoute
   ApiWorkspacesWorkspaceIdRunsRoute: typeof ApiWorkspacesWorkspaceIdRunsRoute
   ApiWorkspacesWorkspaceIdSyncRoute: typeof ApiWorkspacesWorkspaceIdSyncRoute
+  ApiWorkspacesWorkspaceIdGitBranchRoute: typeof ApiWorkspacesWorkspaceIdGitBranchRoute
+  ApiWorkspacesWorkspaceIdGitCommitRoute: typeof ApiWorkspacesWorkspaceIdGitCommitRoute
+  ApiWorkspacesWorkspaceIdGitPullRequestRoute: typeof ApiWorkspacesWorkspaceIdGitPullRequestRoute
+  ApiWorkspacesWorkspaceIdGitPushRoute: typeof ApiWorkspacesWorkspaceIdGitPushRoute
+  ApiWorkspacesWorkspaceIdGitStatusRoute: typeof ApiWorkspacesWorkspaceIdGitStatusRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -450,6 +520,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsSlugDotwellKnownAgentCardDotjsonRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/workspaces/$workspaceId/git/status': {
+      id: '/api/workspaces/$workspaceId/git/status'
+      path: '/api/workspaces/$workspaceId/git/status'
+      fullPath: '/api/workspaces/$workspaceId/git/status'
+      preLoaderRoute: typeof ApiWorkspacesWorkspaceIdGitStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/$workspaceId/git/push': {
+      id: '/api/workspaces/$workspaceId/git/push'
+      path: '/api/workspaces/$workspaceId/git/push'
+      fullPath: '/api/workspaces/$workspaceId/git/push'
+      preLoaderRoute: typeof ApiWorkspacesWorkspaceIdGitPushRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/$workspaceId/git/pull-request': {
+      id: '/api/workspaces/$workspaceId/git/pull-request'
+      path: '/api/workspaces/$workspaceId/git/pull-request'
+      fullPath: '/api/workspaces/$workspaceId/git/pull-request'
+      preLoaderRoute: typeof ApiWorkspacesWorkspaceIdGitPullRequestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/$workspaceId/git/commit': {
+      id: '/api/workspaces/$workspaceId/git/commit'
+      path: '/api/workspaces/$workspaceId/git/commit'
+      fullPath: '/api/workspaces/$workspaceId/git/commit'
+      preLoaderRoute: typeof ApiWorkspacesWorkspaceIdGitCommitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/$workspaceId/git/branch': {
+      id: '/api/workspaces/$workspaceId/git/branch'
+      path: '/api/workspaces/$workspaceId/git/branch'
+      fullPath: '/api/workspaces/$workspaceId/git/branch'
+      preLoaderRoute: typeof ApiWorkspacesWorkspaceIdGitBranchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -489,6 +594,15 @@ const rootRouteChildren: RootRouteChildren = {
     ApiWorkspacesWorkspaceIdPreviewLinkRoute,
   ApiWorkspacesWorkspaceIdRunsRoute: ApiWorkspacesWorkspaceIdRunsRoute,
   ApiWorkspacesWorkspaceIdSyncRoute: ApiWorkspacesWorkspaceIdSyncRoute,
+  ApiWorkspacesWorkspaceIdGitBranchRoute:
+    ApiWorkspacesWorkspaceIdGitBranchRoute,
+  ApiWorkspacesWorkspaceIdGitCommitRoute:
+    ApiWorkspacesWorkspaceIdGitCommitRoute,
+  ApiWorkspacesWorkspaceIdGitPullRequestRoute:
+    ApiWorkspacesWorkspaceIdGitPullRequestRoute,
+  ApiWorkspacesWorkspaceIdGitPushRoute: ApiWorkspacesWorkspaceIdGitPushRoute,
+  ApiWorkspacesWorkspaceIdGitStatusRoute:
+    ApiWorkspacesWorkspaceIdGitStatusRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

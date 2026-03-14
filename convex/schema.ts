@@ -58,6 +58,12 @@ export default defineSchema({
     errorMessage: v.optional(v.string()),
     previewPort: v.optional(v.number()),
     previewUrlPattern: v.optional(v.string()),
+    gitBranchPublished: v.optional(v.boolean()),
+    gitAhead: v.optional(v.number()),
+    gitBehind: v.optional(v.number()),
+    gitDirty: v.optional(v.boolean()),
+    lastCommitSha: v.optional(v.string()),
+    lastPullRequestUrl: v.optional(v.string()),
     lastSyncedAt: v.optional(v.number()),
     lastRunAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -84,10 +90,33 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_slug', ['slug']),
 
+  agentModelCatalog: defineTable({
+    agentSlug: v.string(),
+    providerId: v.string(),
+    providerLabel: v.optional(v.string()),
+    modelId: v.string(),
+    modelLabel: v.optional(v.string()),
+    enabled: v.boolean(),
+    isDefault: v.boolean(),
+    authType: v.optional(v.string()),
+    api: v.optional(v.string()),
+    baseUrl: v.optional(v.string()),
+    apiKeyEnvNames: v.array(v.string()),
+    supportsReasoning: v.optional(v.boolean()),
+    supportsImages: v.optional(v.boolean()),
+    notes: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index('by_agent', ['agentSlug', 'providerId', 'modelId'])
+    .index('by_agent_default', ['agentSlug', 'isDefault'])
+    .index('by_agent_provider', ['agentSlug', 'providerId']),
+
   runs: defineTable({
     ownerId: v.string(),
     workspaceId: v.id('workspaces'),
     agentSlug: v.string(),
+    providerId: v.optional(v.string()),
+    modelId: v.optional(v.string()),
     status: runStatus,
     sessionPath: v.string(),
     sandboxSessionId: v.optional(v.string()),

@@ -1,8 +1,8 @@
 import { Link, Outlet, createFileRoute, useLocation } from '@tanstack/react-router'
-import { SignedIn, UserButton } from '@clerk/tanstack-react-start'
+import { SignedIn } from '@clerk/tanstack-react-start'
 import { AuthCard } from '~/components/auth-card'
+import { UserMenu } from '~/components/user-menu'
 import { WalletButton } from '~/components/wallet-button'
-import { Button } from '~/components/ui/button'
 
 export const Route = createFileRoute('/_authed')({
   beforeLoad: ({ context }) => {
@@ -35,18 +35,11 @@ function AuthedLayout() {
             <span className="size-2 bg-foreground" />
             BuddyPie
           </Link>
-          <nav className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" render={<Link to="/" activeOptions={{ exact: true }} />}>
-              Home
-            </Button>
-            <Button variant="ghost" size="sm" render={<Link to="/dashboard" />}>
-              Dashboard
-            </Button>
-          </nav>
+          <div />
           <div className="flex items-center gap-2">
             <SignedIn>
               <WalletButton />
-              <UserButton />
+              <UserMenu />
             </SignedIn>
           </div>
         </div>

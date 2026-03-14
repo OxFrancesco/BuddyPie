@@ -29,3 +29,24 @@ export async function getGithubOauthToken(userId: string) {
 
   return token
 }
+
+export async function getViewerCommitIdentity(userId: string) {
+  const user = await clerkClient().users.getUser(userId)
+  const primaryEmail =
+    user.emailAddresses.find((emailAddress) => emailAddress.id === user.primaryEmailAddressId)
+      ?.emailAddress ??
+    user.emailAddresses[0]?.emailAddress ??
+    `${user.username ?? user.id}@users.noreply.buddypie.dev`
+
+  const name =
+    user.fullName ||
+    [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+    user.username ||
+    primaryEmail.split('@')[0] ||
+    'BuddyPie User'
+
+  return {
+    name,
+    email: primaryEmail,
+  }
+}
