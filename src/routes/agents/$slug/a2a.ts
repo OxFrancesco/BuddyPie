@@ -2,7 +2,13 @@ import { createFileRoute } from '@tanstack/react-router'
 import type { Id } from '../../../../convex/_generated/dataModel'
 import { parseAgentSlugOrThrow } from '~/lib/agents'
 import { PLATFORM_OWNER_ID } from '~/lib/buddypie-config'
-import { abortRun, ensurePublicWorkspaceRun, refreshRun } from '~/lib/buddypie-service'
+import {
+  abortRun,
+  cancelPreparedWorkspaceRun,
+  preparePublicWorkspaceRunStart,
+  refreshRun,
+  startPreparedWorkspaceRun,
+} from '~/lib/buddypie-service'
 import { errorJson, json, readJsonBody, toErrorMessage } from '~/lib/http'
 import { withX402Protection, x402ConfigError } from '~/lib/x402'
 
@@ -72,35 +78,71 @@ export const Route = createFileRoute('/agents/$slug/a2a')({
               body.params?.configuration?.repo ??
               body.params?.metadata?.repo
             const prompt = extractA2AMessageText(body.params)
-            const runContext = await ensurePublicWorkspaceRun({
+            const prepared = await preparePublicWorkspaceRunStart({
               agentSlug: slug,
               repoInput: repo,
               prompt,
               paymentReceipt: payment?.paymentPayload,
-              payerWallet: body.params?.payerWallet,
+              payerWallet: payment?.payerWallet,
             })
 
-            return json({
-              jsonrpc: '2.0',
-              id: body.id ?? null,
-              result: {
-                id: String(runContext?.run?._id ?? ''),
-                contextId: String(runContext?.workspace?._id ?? ''),
-                status: runContext?.run?.status ?? 'working',
-                messages: [
-                  {
-                    role: 'agent',
-                    parts: [
+            return {
+              response: json({
+                jsonrpc: '2.0',
+                id: body.id ?? null,
+                result: {
+                  id: String(prepared.runContext?.run?._id ?? ''),
+                  contextId: String(prepared.runContext?.workspace?._id ?? ''),
+                  status: prepared.runContext?.run?.status ?? 'working',
+                  messages: [
+                    {
+                      role: 'agent',
+                      parts: [
+                        {
+                          type: 'text',
+                          text: `BuddyPie ${slug} run started for ${prepared.runContext?.workspace?.repoFullName ?? repo}.`,
+                        },
+                      ],
+                    },
+                  ],
+                  artifacts: [],
+                },
+              }),
+              settle: prepared.created,
+              onSettlementFailed: async () => {
+                await cancelPreparedWorkspaceRun({ prepared })
+              },
+              afterSettlement: async ({ payment: settledPayment, settlement }) => {
+                const runContext = await startPreparedWorkspaceRun({
+                  prepared,
+                  paymentReceipt: settledPayment.paymentPayload,
+                  payerWallet: settlement.payer ?? settledPayment.payerWallet,
+                  settlement,
+                })
+
+                return json({
+                  jsonrpc: '2.0',
+                  id: body.id ?? null,
+                  result: {
+                    id: String(runContext?.run?._id ?? ''),
+                    contextId: String(runContext?.workspace?._id ?? ''),
+                    status: runContext?.run?.status ?? 'working',
+                    messages: [
                       {
-                        type: 'text',
-                        text: `BuddyPie ${slug} run started for ${runContext?.workspace?.repoFullName ?? repo}.`,
+                        role: 'agent',
+                        parts: [
+                          {
+                            type: 'text',
+                            text: `BuddyPie ${slug} run started for ${runContext?.workspace?.repoFullName ?? repo}.`,
+                          },
+                        ],
                       },
                     ],
+                    artifacts: [],
                   },
-                ],
-                artifacts: [],
+                })
               },
-            })
+            }
           })
         } catch (error) {
           const message = toErrorMessage(error)

@@ -10,6 +10,7 @@ import {
   getSignedPreviewUrl,
   hasPiProviderCredentials,
   pushRepoChanges,
+  sendRunMessage,
   startPiRun,
   syncRunLogs,
   uploadBuddyPiAssets,
@@ -84,6 +85,10 @@ function normalizeRepoInput(input: string) {
   }
 }
 
+function quoteShell(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
 function tryGetGitHubToken() {
   for (const envName of ['BUDDYPIE_E2E_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) {
     if (process.env[envName]) {
@@ -137,6 +142,10 @@ async function main() {
   const keepSandbox = hasFlag(args, '--keep-sandbox')
   const skipPr = hasFlag(args, '--skip-pr')
   const skipPi = hasFlag(args, '--skip-pi')
+  const piProvider =
+    readStringFlag(args, '--pi-provider', process.env.BUDDYPIE_E2E_PI_PROVIDER ?? 'zai') ?? 'zai'
+  const piModel =
+    readStringFlag(args, '--pi-model', process.env.BUDDYPIE_E2E_PI_MODEL ?? 'glm-4.7') ?? 'glm-4.7'
   const snapshotName =
     readStringFlag(args, '--snapshot', process.env.DAYTONA_SNAPSHOT ?? BUDDYPIE_SNAPSHOT_NAME) ??
     BUDDYPIE_SNAPSHOT_NAME
@@ -172,6 +181,8 @@ async function main() {
     snapshotName,
     repo: repo.repoFullName,
     branchName,
+    piProvider,
+    piModel,
     startedAt: new Date().toISOString(),
     sandboxId: null as string | null,
     previewUrl: null as string | null,
@@ -327,70 +338,212 @@ async function main() {
       },
     })
 
-    if (githubToken) {
-      const pushed = await pushRepoChanges({
+    const canRunPi = !skipPi && hasPiProviderCredentials(piProvider)
+
+    if (canRunPi) {
+      const expectedDocsFiles = ['docs/daytona-e2e.md', 'docs/pi-runtime.md']
+      const minimumDocBytes = 300
+      const docsPrompt = [
+        'Do not edit any existing files.',
+        'Inspect the checked out repository before writing docs so the content matches the current codebase.',
+        'Focus on how BuddyPie uses Daytona sandboxes and PI RPC runs.',
+        'Create the `docs` directory if needed and add exactly these new markdown files:',
+        `- ${expectedDocsFiles[0]}: explain how \`scripts/daytona-e2e.ts\` provisions a Daytona sandbox, verifies preview, runs the docs agent, and records results.`,
+        `- ${expectedDocsFiles[1]}: explain how \`src/lib/daytona.ts\`, \`src/lib/pi.ts\`, and \`src/lib/pi-provider-catalog.ts\` launch PI RPC runs, pass provider/model settings, and attach BuddyPie skills/extensions.`,
+        'Requirements:',
+        '- Base the content on code you read in this repository, not assumptions.',
+        '- Mention concrete file paths, function names, and CLI flags where relevant.',
+        `- Each file must be substantive (roughly ${minimumDocBytes}+ characters).`,
+        '- Only create those two files under `docs/`.',
+        'Stop when both files are written.',
+      ].join('\n')
+      const docsRun = await startPiRun({
+        sandbox,
+        runId: `e2e-docs-${timestamp}`,
+        workspaceId: `e2e-${timestamp}`,
+        agentSlug: 'docs',
+        repoPath,
+        repoFullName: repo.repoFullName,
+        provider: piProvider,
+        model: piModel,
+        prompt: docsPrompt,
+      })
+
+      let docsPreviousOffset = 0
+      let docsStatus: 'active' | 'idle' | 'error' | undefined
+      let docsCommandExitCode: number | null | undefined
+      let docsPromptRetried = false
+      let docsFileSizes: Record<string, number> = {}
+      let docsGit = await getRepoGitState({
         sandbox,
         repoPath,
-        accessToken: githubToken,
       })
-      results.push({
-        name: 'push',
-        status: 'passed',
-        details: pushed,
-      })
+      const matchesExpectedDoc = (candidate: string, expected: string) =>
+        candidate === expected || candidate.endsWith(`/${expected}`)
+      const hasExpectedDocs = (git: typeof docsGit) =>
+        expectedDocsFiles.every((expected) =>
+          git.fileStatus.some((file) => matchesExpectedDoc(file.name, expected)),
+        )
+      let docsEdited = hasExpectedDocs(docsGit)
 
-      if (!skipPr) {
-        const pullRequest = await createGitHubPullRequest({
-          repoFullName: repo.repoFullName,
-          accessToken: githubToken,
-          title: `[E2E] Verify BuddyPie Daytona workflow ${timestamp}`,
-          body: 'Automated BuddyPie Daytona E2E verification branch.',
-          head: branchName,
-          base: repoMeta.defaultBranch,
-          draft: true,
-        })
-        report.pullRequestUrl = pullRequest.url
-        results.push({
-          name: 'pull-request',
-          status: 'passed',
-          details: pullRequest,
-        })
-      } else {
-        results.push({
-          name: 'pull-request',
-          status: 'skipped',
-          details: {
-            reason: 'Skipped by --skip-pr',
-          },
-        })
+      const pollDocsRun = async (attempts: number) => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (docsEdited && (docsStatus === 'idle' || docsCommandExitCode != null)) {
+            break
+          }
+
+          await sleep(3_000)
+          const [synced, command, git] = await Promise.all([
+            syncRunLogs({
+              sandbox,
+              sandboxSessionId: docsRun.sandboxSessionId,
+              commandId: docsRun.commandId,
+              previousOffset: docsPreviousOffset,
+            }),
+            sandbox.process.getSessionCommand(docsRun.sandboxSessionId, docsRun.commandId),
+            getRepoGitState({
+              sandbox,
+              repoPath,
+            }),
+          ])
+
+          docsPreviousOffset = synced.logOffset
+          docsStatus = synced.status ?? docsStatus
+          docsCommandExitCode = command.exitCode
+          docsGit = git
+          docsEdited = hasExpectedDocs(docsGit)
+
+          if (docsStatus === 'error') {
+            break
+          }
+
+          if (!docsEdited && docsCommandExitCode != null && docsStatus !== 'active') {
+            break
+          }
+        }
       }
-    } else {
-      results.push({
-        name: 'push',
-        status: 'skipped',
-        details: {
-          reason:
-            'No GitHub token was available. Set BUDDYPIE_E2E_GITHUB_TOKEN or authenticate gh for push/PR verification.',
-        },
-      })
-      results.push({
-        name: 'pull-request',
-        status: 'skipped',
-        details: {
-          reason:
-            'No GitHub token was available. Set BUDDYPIE_E2E_GITHUB_TOKEN or authenticate gh for push/PR verification.',
-        },
-      })
-    }
 
-    if (!skipPi && hasPiProviderCredentials(process.env.PI_PROVIDER)) {
+      await pollDocsRun(80)
+
+      if (!docsEdited && docsStatus == null && docsCommandExitCode == null) {
+        await sendRunMessage({
+          sandbox,
+          sandboxSessionId: docsRun.sandboxSessionId,
+          commandId: docsRun.commandId,
+          agentSlug: 'docs',
+          repoFullName: repo.repoFullName,
+          repoPath,
+          prompt: docsPrompt,
+          asFollowUp: true,
+        })
+        docsPromptRetried = true
+        await pollDocsRun(40)
+      }
+
+      if (!docsEdited) {
+        const markerExists = await sandbox.process.executeCommand(
+          `cd ${quoteShell(repoPath)} && ${expectedDocsFiles
+            .map((file) => `test -f ${quoteShell(file)}`)
+            .join(' && ')}`,
+          undefined,
+          undefined,
+          20,
+        )
+        docsEdited = markerExists.exitCode === 0
+        if (docsEdited) {
+          docsGit = await getRepoGitState({
+            sandbox,
+            repoPath,
+          })
+        }
+      }
+
+      if (docsEdited) {
+        const fileSizeResult = await sandbox.process.executeCommand(
+          `cd ${quoteShell(repoPath)} && wc -c ${expectedDocsFiles
+            .map((file) => quoteShell(file))
+            .join(' ')}`,
+          undefined,
+          undefined,
+          20,
+        )
+
+        if (fileSizeResult.exitCode === 0) {
+          for (const rawLine of fileSizeResult.result.split(/\r?\n/)) {
+            const line = rawLine.trim()
+            if (!line) {
+              continue
+            }
+
+            const match = line.match(/^(\d+)\s+(.+)$/)
+            if (!match) {
+              continue
+            }
+
+            const [, sizeText, fileName] = match
+            if (expectedDocsFiles.includes(fileName)) {
+              docsFileSizes[fileName] = Number(sizeText)
+            }
+          }
+        }
+      }
+
+      const docsSizePassed = expectedDocsFiles.every(
+        (file) => (docsFileSizes[file] ?? 0) >= minimumDocBytes,
+      )
+      const docsStepPassed = docsEdited && docsStatus !== 'error' && docsSizePassed
+      const docsLogs = await sandbox.process.getSessionCommandLogs(
+        docsRun.sandboxSessionId,
+        docsRun.commandId,
+      )
+      const docsLogText = `${docsLogs.stdout ?? ''}${docsLogs.stderr ?? ''}`
+
+      results.push({
+        name: 'pi-docs-edit',
+        status: docsStepPassed ? 'passed' : 'failed',
+        details: {
+          expectedDocsFiles,
+          sandboxSessionId: docsRun.sandboxSessionId,
+          commandId: docsRun.commandId,
+          status: docsStatus ?? 'unknown',
+          commandExitCode: docsCommandExitCode ?? null,
+          promptRetried: docsPromptRetried,
+          fileSizes: docsFileSizes,
+          logTail: docsLogText.slice(-4_000) || null,
+          git: docsGit,
+        },
+      })
+
+      if (!docsStepPassed) {
+        throw new Error('PI docs agent did not produce the expected repository edit.')
+      }
+
+      const docsCommit = await commitRepoChanges({
+        sandbox,
+        repoPath,
+        files: expectedDocsFiles,
+        message: `docs: verify PI docs workflow ${timestamp}`,
+        author: 'BuddyPie E2E',
+        email: 'e2e@buddypie.dev',
+      })
+      results.push({
+        name: 'commit-pi-docs',
+        status: 'passed',
+        details: {
+          commitSha: docsCommit.commitSha,
+          git: docsCommit.git,
+        },
+      })
+
       const run = await startPiRun({
         sandbox,
-        runId: `e2e-${timestamp}`,
+        runId: `e2e-preview-${timestamp}`,
         workspaceId: `e2e-${timestamp}`,
         agentSlug: 'frontend',
         repoPath,
         repoFullName: repo.repoFullName,
+        provider: piProvider,
+        model: piModel,
         prompt:
           'Do not edit any files. From the repository root, use the bash tool to run exactly `python3 -m http.server 4273 --bind 0.0.0.0 >/tmp/buddypie-e2e-preview.log 2>&1 &` and then run `curl -I http://127.0.0.1:4273`. Keep the server running, do not choose any other port, and only after curl succeeds explicitly mention http://127.0.0.1:4273.',
       })
@@ -470,6 +623,20 @@ async function main() {
       }
     } else if (skipPi) {
       results.push({
+        name: 'pi-docs-edit',
+        status: 'skipped',
+        details: {
+          reason: 'Skipped by --skip-pi',
+        },
+      })
+      results.push({
+        name: 'commit-pi-docs',
+        status: 'skipped',
+        details: {
+          reason: 'Skipped by --skip-pi',
+        },
+      })
+      results.push({
         name: 'pi-preview',
         status: 'skipped',
         details: {
@@ -477,11 +644,76 @@ async function main() {
         },
       })
     } else {
+      const reason = `Missing credentials for PI provider ${piProvider}.`
+      results.push({
+        name: 'pi-docs-edit',
+        status: 'skipped',
+        details: { reason },
+      })
+      results.push({
+        name: 'commit-pi-docs',
+        status: 'skipped',
+        details: { reason },
+      })
       results.push({
         name: 'pi-preview',
         status: 'skipped',
+        details: { reason },
+      })
+    }
+
+    if (githubToken) {
+      const pushed = await pushRepoChanges({
+        sandbox,
+        repoPath,
+        accessToken: githubToken,
+      })
+      results.push({
+        name: 'push',
+        status: 'passed',
+        details: pushed,
+      })
+
+      if (!skipPr) {
+        const pullRequest = await createGitHubPullRequest({
+          repoFullName: repo.repoFullName,
+          accessToken: githubToken,
+          title: `[E2E] Verify BuddyPie Daytona workflow ${timestamp}`,
+          body: 'Automated BuddyPie Daytona E2E verification branch (includes PI docs-agent edit + preview checks).',
+          head: branchName,
+          base: repoMeta.defaultBranch,
+          draft: true,
+        })
+        report.pullRequestUrl = pullRequest.url
+        results.push({
+          name: 'pull-request',
+          status: 'passed',
+          details: pullRequest,
+        })
+      } else {
+        results.push({
+          name: 'pull-request',
+          status: 'skipped',
+          details: {
+            reason: 'Skipped by --skip-pr',
+          },
+        })
+      }
+    } else {
+      results.push({
+        name: 'push',
+        status: 'skipped',
         details: {
-          reason: `Missing credentials for PI provider ${process.env.PI_PROVIDER ?? 'unknown'}.`,
+          reason:
+            'No GitHub token was available. Set BUDDYPIE_E2E_GITHUB_TOKEN or authenticate gh for push/PR verification.',
+        },
+      })
+      results.push({
+        name: 'pull-request',
+        status: 'skipped',
+        details: {
+          reason:
+            'No GitHub token was available. Set BUDDYPIE_E2E_GITHUB_TOKEN or authenticate gh for push/PR verification.',
         },
       })
     }

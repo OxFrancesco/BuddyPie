@@ -46,7 +46,7 @@ export const PLATFORM_AGENT_PROFILES: AgentProfile[] = [
     oasfSkills: ['frontend_development', 'developer_documentation'],
     skillSet: ['common', 'frontend'],
     promptHint:
-      'Start by understanding the running app, then bias toward a working preview URL and crisp visual polish.',
+      'Start by understanding the running app and relevant files, then bias toward a working preview URL, concrete repo changes, and crisp visual polish.',
   },
   {
     slug: 'docs',
@@ -63,7 +63,7 @@ export const PLATFORM_AGENT_PROFILES: AgentProfile[] = [
     oasfSkills: ['developer_documentation', 'documentation_maintenance'],
     skillSet: ['common', 'docs'],
     promptHint:
-      'Prefer accurate, maintainable documentation that reflects the current codebase instead of aspirational docs.',
+      'Prefer accurate, maintainable documentation grounded in the current codebase instead of aspirational docs, placeholder markdown, or thin stubs.',
   },
 ]
 

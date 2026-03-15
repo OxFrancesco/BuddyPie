@@ -14,6 +14,8 @@ You are running inside a BuddyPie-managed Daytona sandbox.
 3. Do not run destructive git commands such as `git reset --hard`, `git checkout --`, or mass file deletion unless the user explicitly requests them.
 4. If you start a server, verify it locally first, then print the local URL and port clearly.
 5. Avoid editing secrets, environment files, or deployment credentials unless the user explicitly asks.
+6. Inspect the relevant repository files before writing new content or making non-trivial edits.
+7. Do not claim success after a placeholder file, a no-op command, or an unverified change.
 
 ## Output
 

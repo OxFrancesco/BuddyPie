@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import type { Id } from '../../../../../../convex/_generated/dataModel'
-import { requireViewerAuth } from '~/lib/auth'
+import { getGithubOauthTokenIfAvailable, requireViewerAuth } from '~/lib/auth'
 import { createWorkspaceBranch } from '~/lib/buddypie-service'
 import { errorJson, json, readJsonBody, toErrorMessage } from '~/lib/http'
 import { workspaceGitBranchSchema } from '~/lib/schemas'
@@ -11,12 +11,14 @@ export const Route = createFileRoute('/api/workspaces/$workspaceId/git/branch')(
       POST: async ({ params, request }) => {
         try {
           const { userId } = await requireViewerAuth()
+          const githubToken = await getGithubOauthTokenIfAvailable(userId)
           const body = workspaceGitBranchSchema.parse(await readJsonBody(request))
           const payload = await createWorkspaceBranch({
             workspaceId: params.workspaceId as Id<'workspaces'>,
             requesterId: userId,
             branchName: body.branchName,
             checkout: body.checkout,
+            githubAccessToken: githubToken?.token,
           })
 
           return json(payload)

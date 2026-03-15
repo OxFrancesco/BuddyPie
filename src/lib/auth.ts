@@ -30,6 +30,21 @@ export async function getGithubOauthToken(userId: string) {
   return token
 }
 
+export async function getGithubOauthTokenIfAvailable(userId: string) {
+  try {
+    return await getGithubOauthToken(userId)
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes('GitHub access token is unavailable')
+    ) {
+      return null
+    }
+
+    throw error
+  }
+}
+
 export async function getViewerCommitIdentity(userId: string) {
   const user = await clerkClient().users.getUser(userId)
   const primaryEmail =

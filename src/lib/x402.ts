@@ -7,6 +7,7 @@ import type {
 import { HTTPFacilitatorClient, x402ResourceServer } from '@x402/core/server'
 import { x402HTTPResourceServer } from '@x402/core/http'
 import { ExactEvmScheme } from '@x402/evm/exact/server'
+import { getAddress } from 'viem'
 import {
   BASE_SEPOLIA_CAIP2,
   PLATFORM_AGENT_PROFILES,
@@ -48,6 +49,82 @@ class RequestAdapter implements HTTPAdapter {
   getBody() {
     return this.body
   }
+}
+
+type VerifiedPayment = {
+  paymentPayload: any
+  paymentRequirements: any
+  declaredExtensions?: Record<string, unknown>
+  payerWallet?: string
+}
+
+type ProtectedHandlerResult =
+  | Response
+  | {
+      response: Response
+      settle?: boolean
+      afterSettlement?: (context: {
+        payment: VerifiedPayment
+        settlement: any
+      }) => Promise<Response | void>
+      onSettlementFailed?: (context: {
+        payment: VerifiedPayment
+        settlement: any
+      }) => Promise<void>
+    }
+
+function normalizeProtectedHandlerResult(result: ProtectedHandlerResult) {
+  if (result instanceof Response) {
+    return {
+      response: result,
+      settle: true,
+      afterSettlement: undefined,
+      onSettlementFailed: undefined,
+    }
+  }
+
+  return {
+    response: result.response,
+    settle: result.settle ?? true,
+    afterSettlement: result.afterSettlement,
+    onSettlementFailed: result.onSettlementFailed,
+  }
+}
+
+function readNestedString(
+  value: unknown,
+  path: readonly string[],
+): string | undefined {
+  let current: unknown = value
+
+  for (const segment of path) {
+    if (!current || typeof current !== 'object' || !(segment in current)) {
+      return undefined
+    }
+    current = (current as Record<string, unknown>)[segment]
+  }
+
+  return typeof current === 'string' ? current : undefined
+}
+
+function normalizeWalletAddress(value?: string) {
+  if (!value) {
+    return undefined
+  }
+
+  try {
+    return getAddress(value)
+  } catch {
+    return value
+  }
+}
+
+export function extractX402PayerWallet(paymentPayload: unknown) {
+  return normalizeWalletAddress(
+    readNestedString(paymentPayload, ['payload', 'authorization', 'from']) ??
+      readNestedString(paymentPayload, ['payload', 'permit2Authorization', 'from']) ??
+      readNestedString(paymentPayload, ['payload', 'from']),
+  )
 }
 
 function agentSlugFromRequest(context: HTTPRequestContext) {
@@ -105,6 +182,26 @@ async function buildHttpServer() {
           agentSlug: agentSlugFromRequest(context),
         },
       }),
+      settlementFailedResponseBody: async (
+        _context: HTTPRequestContext,
+        failure: {
+          errorReason?: string
+          errorMessage?: string
+          payer?: string
+          transaction?: string
+        },
+      ) => ({
+        contentType: 'application/json',
+        body: {
+          error:
+            failure.errorMessage ??
+            failure.errorReason ??
+            'x402 settlement failed while charging the wallet.',
+          details: failure.errorReason ?? failure.errorMessage ?? null,
+          payer: failure.payer ?? null,
+          transaction: failure.transaction ?? null,
+        },
+      }),
     },
     'POST /agents/*/a2a': {
       accepts: {
@@ -115,6 +212,26 @@ async function buildHttpServer() {
       },
       description: 'Paid public A2A execution for public GitHub repositories',
       mimeType: 'application/json',
+      settlementFailedResponseBody: async (
+        _context: HTTPRequestContext,
+        failure: {
+          errorReason?: string
+          errorMessage?: string
+          payer?: string
+          transaction?: string
+        },
+      ) => ({
+        contentType: 'application/json',
+        body: {
+          error:
+            failure.errorMessage ??
+            failure.errorReason ??
+            'x402 settlement failed while charging the wallet.',
+          details: failure.errorReason ?? failure.errorMessage ?? null,
+          payer: failure.payer ?? null,
+          transaction: failure.transaction ?? null,
+        },
+      }),
     },
     'POST /agents/*/mcp': {
       accepts: {
@@ -125,6 +242,26 @@ async function buildHttpServer() {
       },
       description: 'Paid public MCP execution for public GitHub repositories',
       mimeType: 'application/json',
+      settlementFailedResponseBody: async (
+        _context: HTTPRequestContext,
+        failure: {
+          errorReason?: string
+          errorMessage?: string
+          payer?: string
+          transaction?: string
+        },
+      ) => ({
+        contentType: 'application/json',
+        body: {
+          error:
+            failure.errorMessage ??
+            failure.errorReason ??
+            'x402 settlement failed while charging the wallet.',
+          details: failure.errorReason ?? failure.errorMessage ?? null,
+          payer: failure.payer ?? null,
+          transaction: failure.transaction ?? null,
+        },
+      }),
     },
   }
 
@@ -180,14 +317,8 @@ export async function withX402Protection(
   request: Request,
   handler: (context: {
     parsedBody: unknown
-    payment:
-      | null
-      | {
-          paymentPayload: any
-          paymentRequirements: any
-          declaredExtensions?: Record<string, unknown>
-        }
-  }) => Promise<Response>,
+    payment: VerifiedPayment | null
+  }) => Promise<ProtectedHandlerResult>,
 ) {
   let parsedBody: unknown = null
   try {
@@ -216,24 +347,34 @@ export async function withX402Protection(
     return instructionsToResponse(gate.response)
   }
 
-  const response = await handler({
-    parsedBody,
-    payment:
-      gate.type === 'payment-verified'
-        ? {
-            paymentPayload: gate.paymentPayload,
-            paymentRequirements: gate.paymentRequirements,
-            declaredExtensions: gate.declaredExtensions,
-          }
-        : null,
-  })
+  const payment =
+    gate.type === 'payment-verified'
+      ? {
+          paymentPayload: gate.paymentPayload,
+          paymentRequirements: gate.paymentRequirements,
+          declaredExtensions: gate.declaredExtensions,
+          payerWallet: extractX402PayerWallet(gate.paymentPayload),
+        }
+      : null
 
-  if (gate.type !== 'payment-verified' || !response.ok) {
-    return response
+  const handlerResult = normalizeProtectedHandlerResult(
+    await handler({
+      parsedBody,
+      payment,
+    }),
+  )
+
+  if (
+    gate.type !== 'payment-verified' ||
+    !handlerResult.response.ok ||
+    !handlerResult.settle
+  ) {
+    return handlerResult.response
   }
 
-  const responseHeaders = new Headers(response.headers)
-  const responseBytes = await response.arrayBuffer()
+  if (!payment) {
+    return handlerResult.response
+  }
 
   const settlement = await httpServer.processSettlement(
     gate.paymentPayload,
@@ -241,13 +382,41 @@ export async function withX402Protection(
     gate.declaredExtensions,
     {
       request: context,
-      responseBody: Buffer.from(responseBytes),
     },
   )
 
   if (!settlement.success) {
+    await handlerResult.onSettlementFailed?.({
+      payment,
+      settlement,
+    })
+
     return instructionsToResponse(settlement.response)
   }
+
+  let response = handlerResult.response
+  if (handlerResult.afterSettlement) {
+    try {
+      const settledResponse = await handlerResult.afterSettlement({
+        payment,
+        settlement,
+      })
+      if (settledResponse) {
+        response = settledResponse
+      }
+    } catch (error) {
+      response = errorJson(
+        500,
+        'x402 payment settled, but BuddyPie failed while starting the run.',
+        {
+          details: error instanceof Error ? error.message : String(error),
+        },
+      )
+    }
+  }
+
+  const responseHeaders = new Headers(response.headers)
+  const responseBytes = await response.arrayBuffer()
 
   for (const [name, value] of Object.entries(settlement.headers)) {
     responseHeaders.set(name, value)

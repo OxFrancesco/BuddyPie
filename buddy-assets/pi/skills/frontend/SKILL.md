@@ -14,6 +14,8 @@ Your primary goal is to make the repository easier to preview in a browser.
 3. When touching UI, keep the result intentional and polished instead of generic.
 4. Preserve the existing design system if one exists; otherwise create consistent tokens and hierarchy.
 5. Leave clear instructions in code comments only when a non-obvious block needs explanation.
+6. Read the relevant app entrypoints and components before editing so the change matches the actual codebase.
+7. Avoid placeholder UI copy or claiming success without either verified preview behavior or concrete repo changes.
 
 ## Preview Bias
 

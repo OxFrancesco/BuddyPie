@@ -93,6 +93,21 @@ export function buildAgentPrompt(options: {
   prompt: string
 }) {
   const profile = getAgentProfile(options.agentSlug)
+  const executionChecklist = [
+    '- Inspect the relevant repository files before you write or edit anything.',
+    '- Prefer meaningful repository-backed output over placeholder files, stub content, or no-op edits.',
+    '- Before you say the task is done, verify the result with the right evidence: changed files, command output, preview health, or both.',
+    '- If no file edits are needed, provide a substantive answer grounded in the files you inspected.',
+    ...(options.agentSlug === 'frontend'
+      ? [
+          '- For frontend work, bias toward a working preview and mention the verified local URL or port when you have one.',
+          '- Do not claim a frontend task is complete after only describing a plan if the request required code or preview changes.',
+        ]
+      : [
+          '- For docs work, name concrete file paths, functions, flags, or commands when they matter.',
+          '- Do not create placeholder markdown or thin stubs just to satisfy the request.',
+        ]),
+  ]
 
   return [
     `BuddyPie runtime context for ${profile.name}:`,
@@ -100,6 +115,9 @@ export function buildAgentPrompt(options: {
     `- Working directory: ${options.repoPath}`,
     `- Agent profile hint: ${profile.promptHint}`,
     `- The sandbox is persistent. Avoid destructive git resets or checkout commands unless the user explicitly requests them.`,
+    '',
+    'Execution checklist:',
+    ...executionChecklist,
     '',
     `User request:`,
     options.prompt.trim(),
@@ -161,14 +179,24 @@ export function parsePiRpcOutput(chunk: string) {
           status = 'idle'
           events.push({ type: 'agent_end', raw: parsed, createdAt: now })
           break
-        case 'response':
+        case 'response': {
+          const success = parsed.success !== false
+          if (!success) {
+            status = 'error'
+          }
+
           events.push({
-            type: 'rpc_response',
-            content: parsed.command ? `${parsed.command}: ${parsed.success}` : undefined,
+            type: success ? 'rpc_response' : 'error',
+            content: success
+              ? parsed.command
+                ? `${parsed.command}: ${parsed.success}`
+                : 'response: true'
+              : parsed.error ?? parsed.message ?? `${parsed.command ?? 'command'} failed`,
             raw: parsed,
             createdAt: now,
           })
           break
+        }
         case 'message_update': {
           const assistantEvent = parsed.assistantMessageEvent
           if (assistantEvent?.type === 'text_delta' && assistantEvent.delta) {

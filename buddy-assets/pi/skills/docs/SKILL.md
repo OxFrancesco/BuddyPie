@@ -14,6 +14,8 @@ Write documentation that reflects the current repository, not an idealized futur
 3. Call out assumptions and prerequisites when they matter.
 4. If the repo already has docs conventions, reuse them.
 5. Avoid marketing filler; optimize for developer usefulness.
+6. Make docs repository-specific by referencing real file paths, functions, flags, or commands when they matter.
+7. Avoid placeholder markdown, thin stubs, or generic headings that are not backed by code you inspected.
 
 ## Deliverables
 

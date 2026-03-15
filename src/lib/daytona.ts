@@ -71,6 +71,10 @@ export function buildWorkspaceLabels(options: {
   }
 }
 
+export function isDaytonaNotFoundError(error: unknown) {
+  return toErrorMessage(error).toLowerCase().includes('not found')
+}
+
 export function getPiRuntimeEnv() {
   return Object.fromEntries(
     PI_RUNTIME_ENV_NAMES.flatMap((name) =>
@@ -81,6 +85,184 @@ export function getPiRuntimeEnv() {
 
 export function hasPiProviderCredentials(provider?: string) {
   return hasPiProviderCredentialsFromEnv(provider, process.env)
+}
+
+function quoteShell(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function normalizeGitRemoteUrl(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  const sshMatch = trimmed.match(/^git@([^:]+):(.+)$/)
+  if (sshMatch) {
+    return `${sshMatch[1]}/${sshMatch[2]}`
+      .replace(/\.git$/i, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '')
+      .toLowerCase()
+  }
+
+  try {
+    const parsed = new URL(trimmed)
+    return `${parsed.hostname}${parsed.pathname}`
+      .replace(/\.git$/i, '')
+      .replace(/\/+$/, '')
+      .toLowerCase()
+  } catch {
+    return trimmed
+      .replace(/\.git$/i, '')
+      .replace(/\/+$/, '')
+      .toLowerCase()
+  }
+}
+
+function withGitHubToken(remoteUrl: string, accessToken: string) {
+  const sshMatch = remoteUrl.trim().match(/^git@github\.com:(.+)$/)
+  if (sshMatch) {
+    return `https://x-access-token:${accessToken}@github.com/${sshMatch[1]}`
+  }
+
+  try {
+    const parsed = new URL(remoteUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return null
+    }
+
+    parsed.username = 'x-access-token'
+    parsed.password = accessToken
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+async function isOriginBranchPublished(options: {
+  sandbox: Sandbox
+  repoPath: string
+  branch: string
+  accessToken?: string
+}) {
+  const origin = await options.sandbox.process.executeCommand(
+    `git -C ${quoteShell(options.repoPath)} remote get-url origin`,
+    undefined,
+    undefined,
+    30,
+  )
+
+  if (origin.exitCode !== 0 || !origin.result?.trim()) {
+    return false
+  }
+
+  const remoteTarget =
+    options.accessToken && origin.result
+      ? withGitHubToken(origin.result, options.accessToken) ?? 'origin'
+      : 'origin'
+
+  const published = await options.sandbox.process.executeCommand(
+    `git -C ${quoteShell(options.repoPath)} ls-remote --exit-code --heads ${quoteShell(remoteTarget)} ${quoteShell(options.branch)}`,
+    undefined,
+    undefined,
+    60,
+  )
+
+  return published.exitCode === 0
+}
+
+function isMissingRemoteBranchError(error: unknown, branch: string) {
+  const message = toErrorMessage(error).toLowerCase()
+  const branchToken = branch.toLowerCase()
+
+  return (
+    message.includes(`remote branch ${branchToken}`) ||
+    message.includes(`origin/${branchToken}`) ||
+    message.includes("couldn't find remote ref") ||
+    message.includes('remote ref does not exist') ||
+    message.includes('remote branch not found')
+  )
+}
+
+async function checkoutOrCreateLocalBranch(options: {
+  sandbox: Sandbox
+  repoPath: string
+  branch: string
+}) {
+  const checkout = await options.sandbox.process.executeCommand(
+    `git -C ${quoteShell(options.repoPath)} checkout -B ${quoteShell(options.branch)}`,
+    undefined,
+    undefined,
+    60,
+  )
+
+  if (checkout.exitCode !== 0) {
+    throw new Error(
+      checkout.result || `Failed to create fallback branch ${options.branch}`,
+    )
+  }
+}
+
+async function cloneRepoWithBranchFallback(options: {
+  sandbox: Sandbox
+  repoPath: string
+  cloneUrl: string
+  branch: string
+  accessToken?: string
+}) {
+  try {
+    await options.sandbox.git.clone(
+      options.cloneUrl,
+      options.repoPath,
+      options.branch,
+      undefined,
+      options.accessToken ? 'x-access-token' : undefined,
+      options.accessToken,
+    )
+    return
+  } catch (error) {
+    if (!isMissingRemoteBranchError(error, options.branch)) {
+      throw error
+    }
+  }
+
+  await options.sandbox.git.clone(
+    options.cloneUrl,
+    options.repoPath,
+    undefined,
+    undefined,
+    options.accessToken ? 'x-access-token' : undefined,
+    options.accessToken,
+  )
+
+  await checkoutOrCreateLocalBranch({
+    sandbox: options.sandbox,
+    repoPath: options.repoPath,
+    branch: options.branch,
+  })
+}
+
+async function isRepoOriginExpected(options: {
+  sandbox: Sandbox
+  repoPath: string
+  expectedCloneUrl: string
+}) {
+  const origin = await options.sandbox.process.executeCommand(
+    `git -C ${quoteShell(options.repoPath)} remote get-url origin`,
+    undefined,
+    undefined,
+    30,
+  )
+
+  if (origin.exitCode !== 0) {
+    return false
+  }
+
+  return (
+    normalizeGitRemoteUrl(origin.result) ===
+    normalizeGitRemoteUrl(options.expectedCloneUrl)
+  )
 }
 
 async function ensureFolder(sandbox: Sandbox, remotePath: string) {
@@ -136,11 +318,51 @@ export async function ensureSandbox(options: {
 }) {
   const daytona = getDaytonaClient()
   const env = getServerEnv()
+  const expectedLabels = buildWorkspaceLabels({
+    ownerId: options.ownerId,
+    workspaceId: options.workspaceId,
+    repoFullName: options.repoFullName,
+  })
+
+  async function reconcileExistingSandbox(sandbox: Sandbox) {
+    const labelsNeedUpdate = Object.entries(expectedLabels).some(
+      ([key, value]) => sandbox.labels?.[key] !== value,
+    )
+
+    if (labelsNeedUpdate) {
+      await sandbox.setLabels({
+        ...(sandbox.labels ?? {}),
+        ...expectedLabels,
+      })
+    }
+
+    await sandbox.start(60)
+    return sandbox
+  }
 
   if (options.existingSandboxId) {
-    const existing = await daytona.get(options.existingSandboxId)
-    await existing.start(60)
-    return existing
+    try {
+      const existing = await daytona.get(options.existingSandboxId)
+      return reconcileExistingSandbox(existing)
+    } catch (error) {
+      if (!isDaytonaNotFoundError(error)) {
+        throw error
+      }
+    }
+  }
+
+  try {
+    const existing = await daytona.findOne({
+      labels: {
+        app: 'buddypie',
+        workspaceId: options.workspaceId,
+      },
+    })
+    return reconcileExistingSandbox(existing)
+  } catch (error) {
+    if (!isDaytonaNotFoundError(error)) {
+      throw error
+    }
   }
 
   try {
@@ -157,11 +379,7 @@ export async function ensureSandbox(options: {
       autoStopInterval: 30,
       autoArchiveInterval: 10080,
       autoDeleteInterval: -1,
-      labels: buildWorkspaceLabels({
-        ownerId: options.ownerId,
-        workspaceId: options.workspaceId,
-        repoFullName: options.repoFullName,
-      }),
+      labels: expectedLabels,
     },
     { timeout: 90 },
   )
@@ -178,21 +396,46 @@ export async function ensureRepoClone(options: {
   branch: string
   accessToken?: string
 }) {
+  const gitDirPath = path.posix.join(options.repoPath, '.git')
+  let shouldClone = true
+
   try {
     await options.sandbox.fs.getFileDetails(options.repoPath)
-    return
+    const gitDirCheck = await options.sandbox.process.executeCommand(
+      `test -d ${quoteShell(gitDirPath)}`,
+      undefined,
+      undefined,
+      30,
+    )
+
+    if (gitDirCheck.exitCode === 0) {
+      shouldClone = !(await isRepoOriginExpected({
+        sandbox: options.sandbox,
+        repoPath: options.repoPath,
+        expectedCloneUrl: options.cloneUrl,
+      }))
+    }
+
+    if (shouldClone) {
+      await options.sandbox.fs.deleteFile(options.repoPath, true)
+    }
   } catch {
-    await ensureFolder(options.sandbox, path.posix.dirname(options.repoPath))
+    // Fall through to create a fresh clone.
   }
 
-  await options.sandbox.git.clone(
-    options.cloneUrl,
-    options.repoPath,
-    options.branch,
-    undefined,
-    options.accessToken ? 'x-access-token' : undefined,
-    options.accessToken,
-  )
+  if (!shouldClone) {
+    return
+  }
+
+  await ensureFolder(options.sandbox, path.posix.dirname(options.repoPath))
+
+  await cloneRepoWithBranchFallback({
+    sandbox: options.sandbox,
+    repoPath: options.repoPath,
+    cloneUrl: options.cloneUrl,
+    branch: options.branch,
+    accessToken: options.accessToken,
+  })
 }
 
 export async function syncRepoClone(options: {
@@ -314,10 +557,71 @@ export async function pushRepoChanges(options: {
     options.accessToken,
   )
 
-  return getRepoGitState({
+  let git = await getRepoGitState({
     sandbox: options.sandbox,
     repoPath: options.repoPath,
   })
+
+  if (!git.branchPublished) {
+    const currentBranch = git.currentBranch?.trim()
+    if (!currentBranch) {
+      throw new Error('Unable to publish branch: repository is not on a named branch')
+    }
+
+    const origin = await options.sandbox.process.executeCommand(
+      `git -C ${quoteShell(options.repoPath)} remote get-url origin`,
+      undefined,
+      undefined,
+      30,
+    )
+
+    if (origin.exitCode !== 0) {
+      throw new Error('Unable to determine git origin for upstream push')
+    }
+
+    const remoteTarget =
+      options.accessToken && origin.result
+        ? withGitHubToken(origin.result, options.accessToken) ?? 'origin'
+        : 'origin'
+
+    const publish = await options.sandbox.process.executeCommand(
+      `git -C ${quoteShell(options.repoPath)} push -u ${quoteShell(remoteTarget)} ${quoteShell(currentBranch)}`,
+      undefined,
+      undefined,
+      120,
+    )
+
+    if (publish.exitCode !== 0) {
+      if (options.accessToken) {
+        throw new Error(`Failed to publish branch ${currentBranch} to origin`)
+      }
+
+      throw new Error(publish.result || `Failed to publish branch ${currentBranch} to origin`)
+    }
+
+    git = await getRepoGitState({
+      sandbox: options.sandbox,
+      repoPath: options.repoPath,
+    })
+  }
+
+  if (!git.branchPublished && git.currentBranch) {
+    const publishedOnRemote = await isOriginBranchPublished({
+      sandbox: options.sandbox,
+      repoPath: options.repoPath,
+      branch: git.currentBranch,
+      accessToken: options.accessToken,
+    })
+
+    if (publishedOnRemote) {
+      git = {
+        ...git,
+        branchPublished: true,
+      }
+    }
+  }
+
+  return git
 }
 
 export async function startPiRun(options: {
@@ -331,59 +635,51 @@ export async function startPiRun(options: {
   provider?: string
   model?: string
 }) {
-  const env = getServerEnv()
-  const sandboxSessionId = `buddypie-${options.runId}`
-  const sessionDir = getRemotePiSessionDir(options.workspaceId, options.agentSlug)
+  const started = await launchPiRpcProcess({
+    sandbox: options.sandbox,
+    runId: options.runId,
+    workspaceId: options.workspaceId,
+    agentSlug: options.agentSlug,
+    repoPath: options.repoPath,
+    provider: options.provider,
+    model: options.model,
+  })
+  const promptMessage = buildAgentPrompt({
+    agentSlug: options.agentSlug,
+    repoFullName: options.repoFullName,
+    repoPath: options.repoPath,
+    prompt: options.prompt,
+  })
 
-  await ensureFolder(options.sandbox, BUDDYPIE_REMOTE_PI_SESSIONS_DIR)
-  await ensureFolder(
-    options.sandbox,
-    `${BUDDYPIE_REMOTE_PI_SESSIONS_DIR}/${options.workspaceId}`,
-  )
-  await ensureFolder(options.sandbox, sessionDir)
-  await options.sandbox.process.createSession(sandboxSessionId)
-
-  const startResponse = await options.sandbox.process.executeSessionCommand(
-    sandboxSessionId,
-    {
-      command: buildPiRpcCommand({
-        agentSlug: options.agentSlug,
-        repoPath: options.repoPath,
-        sessionDir,
-        provider: options.provider ?? env.piProvider,
-        model: options.model ?? env.piModel,
-        command: env.piCommand,
-        envVars: getPiRuntimeEnv(),
-      }),
-      runAsync: true,
-      suppressInputEcho: true,
-    },
-    30,
-  )
-
-  if (!startResponse.cmdId) {
-    throw new Error('Daytona did not return a PI command id')
-  }
-
-  await sleep(750)
   await options.sandbox.process.sendSessionCommandInput(
-    sandboxSessionId,
-    startResponse.cmdId,
-    `${createRpcPrompt(
-      buildAgentPrompt({
-        agentSlug: options.agentSlug,
-        repoFullName: options.repoFullName,
-        repoPath: options.repoPath,
-        prompt: options.prompt,
-      }),
-    )}\n`,
+    started.sandboxSessionId,
+    started.commandId,
+    `${createRpcPrompt(promptMessage)}\n`,
   )
 
-  return {
-    sandboxSessionId,
-    commandId: startResponse.cmdId,
-    sessionPath: sessionDir,
-  }
+  return started
+}
+
+export async function resumePiRun(options: {
+  sandbox: Sandbox
+  runId: string
+  workspaceId: string
+  agentSlug: AgentSlug
+  repoPath: string
+  provider?: string
+  model?: string
+  sandboxSessionId?: string
+}) {
+  return launchPiRpcProcess({
+    sandbox: options.sandbox,
+    runId: options.runId,
+    workspaceId: options.workspaceId,
+    agentSlug: options.agentSlug,
+    repoPath: options.repoPath,
+    provider: options.provider,
+    model: options.model,
+    sandboxSessionId: options.sandboxSessionId,
+  })
 }
 
 export async function sendRunMessage(options: {
@@ -434,7 +730,9 @@ export async function syncRunLogs(options: {
     options.commandId,
   )
 
-  const output = logs.output ?? `${logs.stdout ?? ''}${logs.stderr ?? ''}`
+  // The SDK returns raw multiplexed bytes in `output`; parse demuxed streams instead.
+  const demuxedOutput = `${logs.stdout ?? ''}${logs.stderr ?? ''}`
+  const output = demuxedOutput.length > 0 ? demuxedOutput : (logs.output ?? '')
   const previousOffset = options.previousOffset ?? 0
   const newChunk = output.slice(previousOffset)
   const parsed = parsePiRpcOutput(newChunk)
@@ -451,7 +749,7 @@ export async function getSignedPreviewUrl(sandbox: Sandbox, port: number) {
 
 export async function recoverableDaytonaError(error: unknown) {
   const message = toErrorMessage(error)
-  if (message.includes('not found')) {
+  if (isDaytonaNotFoundError(error)) {
     return {
       retryable: false,
       message,
@@ -466,4 +764,70 @@ export async function recoverableDaytonaError(error: unknown) {
 
 export async function getSandboxHomeDir(sandbox: Sandbox) {
   return (await sandbox.getUserHomeDir()) ?? DAYTONA_HOME_DIR
+}
+
+async function ensureProcessSession(sandbox: Sandbox, sessionId: string) {
+  try {
+    await sandbox.process.getSession(sessionId)
+  } catch (error) {
+    if (!isDaytonaNotFoundError(error)) {
+      throw error
+    }
+
+    await sandbox.process.createSession(sessionId)
+  }
+}
+
+async function launchPiRpcProcess(options: {
+  sandbox: Sandbox
+  runId: string
+  workspaceId: string
+  agentSlug: AgentSlug
+  repoPath: string
+  provider?: string
+  model?: string
+  sandboxSessionId?: string
+}) {
+  const env = getServerEnv()
+  const sandboxSessionId = options.sandboxSessionId ?? `buddypie-${options.runId}`
+  const sessionDir = getRemotePiSessionDir(options.workspaceId, options.agentSlug)
+
+  await ensureFolder(options.sandbox, BUDDYPIE_REMOTE_PI_SESSIONS_DIR)
+  await ensureFolder(
+    options.sandbox,
+    `${BUDDYPIE_REMOTE_PI_SESSIONS_DIR}/${options.workspaceId}`,
+  )
+  await ensureFolder(options.sandbox, sessionDir)
+  await ensureProcessSession(options.sandbox, sandboxSessionId)
+  const command = buildPiRpcCommand({
+    agentSlug: options.agentSlug,
+    repoPath: options.repoPath,
+    sessionDir,
+    provider: options.provider ?? env.piProvider,
+    model: options.model ?? env.piModel,
+    command: env.piCommand,
+    envVars: getPiRuntimeEnv(),
+  })
+
+  const startResponse = await options.sandbox.process.executeSessionCommand(
+    sandboxSessionId,
+    {
+      command,
+      runAsync: true,
+      suppressInputEcho: true,
+    },
+    30,
+  )
+
+  if (!startResponse.cmdId) {
+    throw new Error('Daytona did not return a PI command id')
+  }
+
+  await sleep(750)
+
+  return {
+    sandboxSessionId,
+    commandId: startResponse.cmdId,
+    sessionPath: sessionDir,
+  }
 }
