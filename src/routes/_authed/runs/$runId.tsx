@@ -1,14 +1,9 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useAuth } from '@clerk/tanstack-react-start'
 import { useQuery } from 'convex/react'
 import { api as generatedApi } from '../../../../convex/_generated/api'
-import { Badge } from '~/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '~/components/ui/card'
+import { RunStudio } from '~/components/run-studio'
+import { Button } from '~/components/ui/button'
 
 const api = generatedApi as any
 
@@ -26,41 +21,42 @@ function RunDetailPage() {
   const events = useQuery(api.buddypie.runEventsByRun, { runId })
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {runContext?.workspace?.repoFullName ?? 'Run session'}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {runContext?.run?.agentSlug ?? '–'} · {runContext?.run?.status ?? 'loading'}
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Events</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex max-h-[36rem] flex-col gap-2 overflow-auto">
-            {(events ?? []).map((event: any) => (
-              <div
-                key={event._id}
-                className="flex flex-col gap-1 border-2 border-border p-2"
-              >
-                <Badge variant="secondary" className="w-fit text-xs">
-                  {event.type}
-                </Badge>
-                <p className="text-sm text-muted-foreground">
-                  {event.content ?? JSON.stringify(event.raw)}
-                </p>
-              </div>
-            ))}
-            {events?.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No run events captured yet.</p>
-            ) : null}
+    <div className="relative left-1/2 w-screen max-w-[1680px] -translate-x-1/2 px-4 py-6 sm:px-6">
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {runContext?.workspace?.repoFullName ?? 'Run session'}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {runContext?.run?.agentSlug ?? '–'} · {runContext?.run?.status ?? 'loading'}
+            </p>
           </div>
-        </CardContent>
-      </Card>
+
+          {runContext?.workspace?._id ? (
+            <Button
+              variant="outline"
+              size="sm"
+              render={
+                <Link
+                  to="/workspaces/$workspaceId"
+                  params={{ workspaceId: runContext.workspace._id }}
+                />
+              }
+            >
+              Back to workspace
+            </Button>
+          ) : null}
+        </div>
+
+        <RunStudio
+          workspaceId={runContext?.workspace?._id ?? ''}
+          workspace={runContext?.workspace ?? null}
+          run={runContext?.run ?? null}
+          events={events ?? []}
+          allowNewRun={false}
+        />
+      </div>
     </div>
   )
 }

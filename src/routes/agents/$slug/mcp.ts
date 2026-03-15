@@ -1,6 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { parseAgentSlugOrThrow } from '~/lib/agents'
-import { ensurePublicWorkspaceRun } from '~/lib/buddypie-service'
+import {
+  cancelPreparedWorkspaceRun,
+  preparePublicWorkspaceRunStart,
+  startPreparedWorkspaceRun,
+} from '~/lib/buddypie-service'
 import { errorJson, json, readJsonBody, toErrorMessage } from '~/lib/http'
 import { withX402Protection, x402ConfigError } from '~/lib/x402'
 
@@ -64,35 +68,71 @@ export const Route = createFileRoute('/agents/$slug/mcp')({
 
           return await withX402Protection(request, async ({ payment }) => {
             const args = body.params?.arguments ?? {}
-            const runContext = await ensurePublicWorkspaceRun({
+            const prepared = await preparePublicWorkspaceRunStart({
               agentSlug: slug,
               repoInput: args.repo,
               prompt: args.prompt,
               paymentReceipt: payment?.paymentPayload,
-              payerWallet: args.payerWallet,
+              payerWallet: payment?.payerWallet,
             })
 
-            return json({
-              jsonrpc: '2.0',
-              id,
-              result: {
-                content: [
-                  {
-                    type: 'text',
-                    text: JSON.stringify(
-                      {
-                        runId: String(runContext?.run?._id ?? ''),
-                        workspaceId: String(runContext?.workspace?._id ?? ''),
-                        repoFullName: runContext?.workspace?.repoFullName,
-                        status: runContext?.run?.status,
-                      },
-                      null,
-                      2,
-                    ),
-                  },
-                ],
+            return {
+              response: json({
+                jsonrpc: '2.0',
+                id,
+                result: {
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify(
+                        {
+                          runId: String(prepared.runContext?.run?._id ?? ''),
+                          workspaceId: String(prepared.runContext?.workspace?._id ?? ''),
+                          repoFullName: prepared.runContext?.workspace?.repoFullName,
+                          status: prepared.runContext?.run?.status,
+                        },
+                        null,
+                        2,
+                      ),
+                    },
+                  ],
+                },
+              }),
+              settle: prepared.created,
+              onSettlementFailed: async () => {
+                await cancelPreparedWorkspaceRun({ prepared })
               },
-            })
+              afterSettlement: async ({ payment: settledPayment, settlement }) => {
+                const runContext = await startPreparedWorkspaceRun({
+                  prepared,
+                  paymentReceipt: settledPayment.paymentPayload,
+                  payerWallet: settlement.payer ?? settledPayment.payerWallet,
+                  settlement,
+                })
+
+                return json({
+                  jsonrpc: '2.0',
+                  id,
+                  result: {
+                    content: [
+                      {
+                        type: 'text',
+                        text: JSON.stringify(
+                          {
+                            runId: String(runContext?.run?._id ?? ''),
+                            workspaceId: String(runContext?.workspace?._id ?? ''),
+                            repoFullName: runContext?.workspace?.repoFullName,
+                            status: runContext?.run?.status,
+                          },
+                          null,
+                          2,
+                        ),
+                      },
+                    ],
+                  },
+                })
+              },
+            }
           })
         } catch (error) {
           const message = toErrorMessage(error)

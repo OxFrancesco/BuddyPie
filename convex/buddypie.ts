@@ -39,7 +39,7 @@ const DEFAULT_AGENT_PROFILES = [
     oasfDomains: ['technology/software_engineering', 'design/user_interfaces'],
     oasfSkills: ['frontend_development', 'developer_documentation'],
     promptHint:
-      'Bias toward getting the app running quickly and surfacing a preview URL as early as possible.',
+      'Bias toward understanding the app quickly, then surfacing a verified preview URL and concrete repo changes as early as possible.',
   },
   {
     slug: 'docs',
@@ -55,7 +55,7 @@ const DEFAULT_AGENT_PROFILES = [
     oasfDomains: ['technology/software_engineering', 'education/technical_writing'],
     oasfSkills: ['developer_documentation', 'documentation_maintenance'],
     promptHint:
-      'Bias toward clear, maintainable documentation and concise written output.',
+      'Bias toward clear, maintainable documentation grounded in the repo, not placeholder markdown or thin stubs.',
   },
 ] as const
 const DEFAULT_AGENT_MODEL_CATALOG = createDefaultAgentModelCatalog()
@@ -220,6 +220,66 @@ async function getWorkspaceWithAccess(
   }
 
   return workspace
+}
+
+async function requireAuthorizedRequester(ctx: any, requesterId?: string) {
+  const identity = await ctx.auth.getUserIdentity()
+
+  if (requesterId === PLATFORM_OWNER_ID) {
+    if (identity && identity.subject !== PLATFORM_OWNER_ID) {
+      throw new Error('Forbidden')
+    }
+
+    return PLATFORM_OWNER_ID
+  }
+
+  if (!identity?.subject) {
+    throw new Error('Unauthorized')
+  }
+
+  if (requesterId && requesterId !== identity.subject) {
+    throw new Error('Forbidden')
+  }
+
+  return identity.subject
+}
+
+async function requireWorkspaceWriteAccess(
+  ctx: any,
+  workspaceId: Id<'workspaces'>,
+  requesterId?: string,
+) {
+  const actorId = await requireAuthorizedRequester(ctx, requesterId)
+  const workspace = await ctx.db.get(workspaceId)
+
+  if (!workspace) {
+    throw new Error('Workspace not found')
+  }
+
+  if (workspace.ownerId !== actorId) {
+    throw new Error('Forbidden')
+  }
+
+  return workspace
+}
+
+async function requireRunWriteAccess(
+  ctx: any,
+  runId: Id<'runs'>,
+  requesterId?: string,
+) {
+  const actorId = await requireAuthorizedRequester(ctx, requesterId)
+  const run = await ctx.db.get(runId)
+
+  if (!run) {
+    throw new Error('Run not found')
+  }
+
+  if (run.ownerId !== actorId) {
+    throw new Error('Forbidden')
+  }
+
+  return run
 }
 
 export const seedAgentProfiles = mutation({
@@ -444,13 +504,50 @@ export const runEventsByRun = query({
   },
 })
 
+export const runEventsForServer = query({
+  args: {
+    runId: v.id('runs'),
+    requesterId: v.optional(v.string()),
+  },
+  handler: async (ctx, { runId, requesterId }) => {
+    let viewerId: string
+
+    try {
+      viewerId = await requireAuthorizedRequester(ctx, requesterId)
+    } catch {
+      return []
+    }
+
+    const run = await ctx.db.get(runId)
+    if (!run) {
+      return []
+    }
+
+    const workspace = await getWorkspaceWithAccess(ctx, run.workspaceId, viewerId)
+    if (!workspace) {
+      return []
+    }
+
+    return (await ctx.db
+      .query('runEvents')
+      .withIndex('by_run', (q) => q.eq('runId', runId))
+      .collect()
+    ).sort((left, right) => left.createdAt - right.createdAt)
+  },
+})
+
 export const workspaceForServer = query({
   args: {
     workspaceId: v.id('workspaces'),
     requesterId: v.optional(v.string()),
   },
   handler: async (ctx, { workspaceId, requesterId }) => {
-    return getWorkspaceWithAccess(ctx, workspaceId, requesterId)
+    try {
+      const viewerId = await requireAuthorizedRequester(ctx, requesterId)
+      return getWorkspaceWithAccess(ctx, workspaceId, viewerId)
+    } catch {
+      return null
+    }
   },
 })
 
@@ -460,12 +557,20 @@ export const runForServer = query({
     requesterId: v.optional(v.string()),
   },
   handler: async (ctx, { runId, requesterId }) => {
+    let viewerId: string
+
+    try {
+      viewerId = await requireAuthorizedRequester(ctx, requesterId)
+    } catch {
+      return null
+    }
+
     const run = await ctx.db.get(runId)
     if (!run) {
       return null
     }
 
-    const workspace = await getWorkspaceWithAccess(ctx, run.workspaceId, requesterId)
+    const workspace = await getWorkspaceWithAccess(ctx, run.workspaceId, viewerId)
     if (!workspace) {
       return null
     }
@@ -495,6 +600,7 @@ export const findWorkspaceByRepo = query({
 export const prepareWorkspaceImport = mutation({
   args: {
     ownerId: v.string(),
+    requesterId: v.optional(v.string()),
     repoFullName: v.string(),
     repoOwner: v.string(),
     repoName: v.string(),
@@ -504,6 +610,14 @@ export const prepareWorkspaceImport = mutation({
     visibility: v.union(v.literal('public'), v.literal('private')),
   },
   handler: async (ctx, args) => {
+    const requesterId = await requireAuthorizedRequester(
+      ctx,
+      args.requesterId ?? args.ownerId,
+    )
+    if (requesterId !== args.ownerId) {
+      throw new Error('Forbidden')
+    }
+
     await ensureDefaultProfiles(ctx)
     const now = Date.now()
 
@@ -595,13 +709,15 @@ export const prepareWorkspaceImport = mutation({
 export const finalizeWorkspaceImport = mutation({
   args: {
     workspaceId: v.id('workspaces'),
+    requesterId: v.optional(v.string()),
     sandboxId: v.string(),
     sandboxName: v.string(),
     repoPath: v.string(),
     branch: v.string(),
     previewUrlPattern: v.optional(v.string()),
   },
-  handler: async (ctx, { workspaceId, ...rest }) => {
+  handler: async (ctx, { workspaceId, requesterId, ...rest }) => {
+    await requireWorkspaceWriteAccess(ctx, workspaceId, requesterId)
     const now = Date.now()
     await ctx.db.patch(workspaceId, {
       ...rest,
@@ -617,9 +733,11 @@ export const finalizeWorkspaceImport = mutation({
 export const failWorkspaceImport = mutation({
   args: {
     workspaceId: v.id('workspaces'),
+    requesterId: v.optional(v.string()),
     errorMessage: v.string(),
   },
-  handler: async (ctx, { workspaceId, errorMessage }) => {
+  handler: async (ctx, { workspaceId, requesterId, errorMessage }) => {
+    await requireWorkspaceWriteAccess(ctx, workspaceId, requesterId)
     await ctx.db.patch(workspaceId, {
       status: 'error',
       errorMessage,
@@ -632,6 +750,7 @@ export const failWorkspaceImport = mutation({
 export const recordWorkspaceSync = mutation({
   args: {
     workspaceId: v.id('workspaces'),
+    requesterId: v.optional(v.string()),
     branch: v.optional(v.string()),
     status: v.optional(
       v.union(
@@ -644,7 +763,8 @@ export const recordWorkspaceSync = mutation({
     previewPort: v.optional(v.number()),
     errorMessage: v.optional(v.string()),
   },
-  handler: async (ctx, { workspaceId, branch, status, previewPort, errorMessage }) => {
+  handler: async (ctx, { workspaceId, requesterId, branch, status, previewPort, errorMessage }) => {
+    await requireWorkspaceWriteAccess(ctx, workspaceId, requesterId)
     const now = Date.now()
     await ctx.db.patch(workspaceId, {
       branch,
@@ -661,6 +781,7 @@ export const recordWorkspaceSync = mutation({
 export const recordWorkspaceGitMetadata = mutation({
   args: {
     workspaceId: v.id('workspaces'),
+    requesterId: v.optional(v.string()),
     branch: v.optional(v.string()),
     gitBranchPublished: v.optional(v.boolean()),
     gitAhead: v.optional(v.number()),
@@ -669,7 +790,8 @@ export const recordWorkspaceGitMetadata = mutation({
     lastCommitSha: v.optional(v.string()),
     lastPullRequestUrl: v.optional(v.string()),
   },
-  handler: async (ctx, { workspaceId, ...patch }) => {
+  handler: async (ctx, { workspaceId, requesterId, ...patch }) => {
+    await requireWorkspaceWriteAccess(ctx, workspaceId, requesterId)
     await ctx.db.patch(workspaceId, {
       ...patch,
       updatedAt: Date.now(),
@@ -692,6 +814,11 @@ export const prepareRun = mutation({
     paymentReceipt: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const requesterId = await requireAuthorizedRequester(ctx, args.ownerId)
+    if (requesterId !== args.ownerId) {
+      throw new Error('Forbidden')
+    }
+
     const workspace = await ctx.db.get(args.workspaceId)
     if (!workspace) {
       throw new Error('Workspace not found')
@@ -749,6 +876,7 @@ export const prepareRun = mutation({
 export const updateRunTransport = mutation({
   args: {
     runId: v.id('runs'),
+    requesterId: v.optional(v.string()),
     status: v.optional(
       v.union(
         v.literal('starting'),
@@ -769,22 +897,23 @@ export const updateRunTransport = mutation({
     paymentReceipt: v.optional(v.any()),
     payerWallet: v.optional(v.string()),
   },
-  handler: async (ctx, { runId, ...patch }) => {
+  handler: async (ctx, { runId, requesterId, ...patch }) => {
+    const run = await requireRunWriteAccess(ctx, runId, requesterId)
     await ctx.db.patch(runId, patch)
-    const run = await ctx.db.get(runId)
-    if (run && patch.previewPort) {
+    if (patch.previewPort) {
       await ctx.db.patch(run.workspaceId, {
         previewPort: patch.previewPort,
         updatedAt: Date.now(),
       })
     }
-    return run
+    return await ctx.db.get(runId)
   },
 })
 
 export const applyRunLogSync = mutation({
   args: {
     runId: v.id('runs'),
+    requesterId: v.optional(v.string()),
     logOffset: v.number(),
     status: v.optional(
       v.union(
@@ -808,12 +937,9 @@ export const applyRunLogSync = mutation({
       }),
     ),
   },
-  handler: async (ctx, { runId, logOffset, status, previewPort, events }) => {
+  handler: async (ctx, { runId, requesterId, logOffset, status, previewPort, events }) => {
     const now = Date.now()
-    const run = await ctx.db.get(runId)
-    if (!run) {
-      throw new Error('Run not found')
-    }
+    const run = await requireRunWriteAccess(ctx, runId, requesterId)
 
     for (const event of events) {
       await ctx.db.insert('runEvents', {
@@ -844,8 +970,10 @@ export const applyRunLogSync = mutation({
 export const markRunAborted = mutation({
   args: {
     runId: v.id('runs'),
+    requesterId: v.optional(v.string()),
   },
-  handler: async (ctx, { runId }) => {
+  handler: async (ctx, { runId, requesterId }) => {
+    await requireRunWriteAccess(ctx, runId, requesterId)
     const now = Date.now()
     await ctx.db.patch(runId, {
       status: 'aborted',
